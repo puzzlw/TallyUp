@@ -1,0 +1,6 @@
+.streamlit/secrets.toml
+__pycache__/
+*.pyc
+stationery_keeper.db
+stationery_keeper_export.xlsx
+tallyup_export_*.xlsx
