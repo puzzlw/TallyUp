@@ -460,7 +460,7 @@ def localize_df(df):
 
 def render_action_rows(df, id_column, display_columns, key_prefix):
     header_columns = st.columns([1.2] * len(display_columns) + [0.7])
-    for column, (label, _, _) in zip(header_columns, display_columns):
+    for column, (label, field_name, formatter) in zip(header_columns, display_columns):
         column.caption(_(label).upper())
     header_columns[-1].caption(_("Actions").upper())
 
@@ -469,7 +469,7 @@ def render_action_rows(df, id_column, display_columns, key_prefix):
         record_id = int(row[id_column])
         valid_ids.add(record_id)
         row_columns = st.columns([1.2] * len(display_columns) + [0.7])
-        for column, (_, field, formatter) in zip(row_columns, display_columns):
+        for column, (label, field, formatter) in zip(row_columns, display_columns):
             value = row[field]
             column.write(formatter(value) if formatter else value)
 
@@ -805,148 +805,125 @@ elif menu == "Sales":
 
     st.subheader(_("Goods Sales"))
     goods_sales = query_df("""
-        SELECT s.sale_date AS date, i.item_name AS name, s.selling_price,
-               s.quantity, s.total_amount AS total
+        SELECT s.sale_id, s.sale_date, s.item_id, i.item_name, s.quantity,
+               s.selling_price, s.total_amount, s.created_at
         FROM sales s JOIN items i ON i.item_id = s.item_id
         ORDER BY s.sale_date DESC, s.sale_id DESC
         LIMIT 100
     """)
-    st.dataframe(localize_df(goods_sales), use_container_width=True, hide_index=True)
+    if goods_sales.empty:
+        st.info(_("No records available."))
+    else:
+        render_action_rows(
+            goods_sales,
+            "sale_id",
+            [
+                ("Date", "sale_date", None),
+                ("Name", "item_name", None),
+                ("Selling Price", "selling_price", money),
+                ("Quantity", "quantity", None),
+                ("Total", "total_amount", money),
+            ],
+            "goods_sale",
+        )
+
+        selected_sale_id = st.session_state.get("goods_sale_edit_id")
+        if selected_sale_id:
+            sale_row = goods_sales[goods_sales["sale_id"] == selected_sale_id].iloc[0]
+            mapping, options = get_item_options()
+            item_index = options.index(sale_row["item_name"]) if sale_row["item_name"] in options else 0
+            with st.form("goods_sale_edit_form"):
+                edit_sale_date = st.date_input(_("Date"), value=as_date(sale_row["sale_date"]), key="edit_goods_sale_date")
+                edit_item_label = st.selectbox(_("Name"), options, index=item_index, key="edit_goods_sale_item")
+                c1, c2, c3 = st.columns(3)
+                edit_selling_price = c1.number_input(_("Selling Price"), min_value=0.0, value=float(sale_row["selling_price"]), step=100.0, key="edit_goods_sale_price")
+                edit_quantity = c2.number_input(_("Quantity"), min_value=0.0, value=float(sale_row["quantity"]), step=1.0, key="edit_goods_sale_qty")
+                c3.metric(_("Total"), money(edit_selling_price * edit_quantity))
+                save_changes = st.form_submit_button(_("Save Changes"))
+            if save_changes:
+                try:
+                    if edit_selling_price <= 0 or edit_quantity <= 0:
+                        st.error(_("Selling price and quantity must be greater than zero."))
+                    else:
+                        update_goods_sale_record(selected_sale_id, edit_sale_date, mapping[edit_item_label], edit_selling_price, edit_quantity)
+                        st.session_state.pop("goods_sale_edit_id", None)
+                        st.success(_("Record updated."))
+                        st.rerun()
+                except ValueError as exc:
+                    st.error(_(str(exc)))
+
+        selected_delete_sale_id = st.session_state.get("goods_sale_delete_id")
+        if selected_delete_sale_id:
+            with st.form("goods_sale_delete_form"):
+                confirm_delete = st.checkbox(_("Confirm Delete"), key="confirm_goods_sale_delete")
+                delete_record = st.form_submit_button(_("Delete Record"))
+            if delete_record:
+                try:
+                    if confirm_delete:
+                        delete_goods_sale_record(selected_delete_sale_id)
+                        st.session_state.pop("goods_sale_delete_id", None)
+                        st.success(_("Record deleted."))
+                        st.rerun()
+                except ValueError as exc:
+                    st.error(_(str(exc)))
 
     st.subheader(_("Service Sales"))
     service_sales = query_df("""
-        SELECT sale_date AS date, service_name AS name, selling_price,
-               quantity, total_amount AS total
+        SELECT service_sale_id, sale_date, service_name, selling_price,
+               quantity, total_amount, created_at
         FROM service_sales
         ORDER BY sale_date DESC, service_sale_id DESC
         LIMIT 100
     """)
-    st.dataframe(localize_df(service_sales), use_container_width=True, hide_index=True)
+    if service_sales.empty:
+        st.info(_("No records available."))
+    else:
+        render_action_rows(
+            service_sales,
+            "service_sale_id",
+            [
+                ("Date", "sale_date", None),
+                ("Name", "service_name", None),
+                ("Selling Price", "selling_price", money),
+                ("Quantity", "quantity", None),
+                ("Total", "total_amount", money),
+            ],
+            "service_sale",
+        )
 
-    with st.expander(_("Edit / Delete")):
-        edit_type_options = {_("Goods"): "Goods", _("Service"): "Service"}
-        edit_type = edit_type_options[
-            st.radio(_("Sale Type"), list(edit_type_options.keys()), horizontal=True, key="sale_edit_type")
-        ]
+        selected_service_id = st.session_state.get("service_sale_edit_id")
+        if selected_service_id:
+            service_row = service_sales[service_sales["service_sale_id"] == selected_service_id].iloc[0]
+            with st.form("service_sale_edit_form"):
+                c1, c2 = st.columns(2)
+                edit_service_date = c1.date_input(_("Date"), value=as_date(service_row["sale_date"]), key="edit_service_sale_date")
+                edit_service_name = c2.text_input(_("Name"), value=service_row["service_name"], key="edit_service_sale_name")
+                c3, c4, c5 = st.columns(3)
+                edit_service_price = c3.number_input(_("Selling Price"), min_value=0.0, value=float(service_row["selling_price"]), step=100.0, key="edit_service_sale_price")
+                edit_service_quantity = c4.number_input(_("Quantity"), min_value=0.0, value=float(service_row["quantity"]), step=1.0, key="edit_service_sale_qty")
+                c5.metric(_("Total"), money(edit_service_price * edit_service_quantity))
+                save_changes = st.form_submit_button(_("Save Changes"))
+            if save_changes:
+                if not edit_service_name.strip():
+                    st.error(_("Name is required."))
+                elif edit_service_price <= 0 or edit_service_quantity <= 0:
+                    st.error(_("Selling price and quantity must be greater than zero."))
+                else:
+                    update_service_sale_record(selected_service_id, edit_service_date, edit_service_name.strip(), edit_service_price, edit_service_quantity)
+                    st.session_state.pop("service_sale_edit_id", None)
+                    st.success(_("Record updated."))
+                    st.rerun()
 
-        if edit_type == "Goods":
-            editable_sales = query_df("""
-                SELECT s.sale_id, s.sale_date, s.item_id, i.item_name, s.quantity,
-                       s.selling_price, s.total_amount, s.created_at
-                FROM sales s JOIN items i ON i.item_id = s.item_id
-                ORDER BY s.created_at DESC
-            """)
-            if editable_sales.empty:
-                st.info(_("No records available."))
-            else:
-                render_action_rows(
-                    editable_sales,
-                    "sale_id",
-                    [
-                        ("Date", "sale_date", None),
-                        ("Name", "item_name", None),
-                        ("Selling Price", "selling_price", money),
-                        ("Quantity", "quantity", None),
-                        ("Total", "total_amount", money),
-                    ],
-                    "goods_sale",
-                )
-
-                selected_sale_id = st.session_state.get("goods_sale_edit_id")
-                if selected_sale_id:
-                    sale_row = editable_sales[editable_sales["sale_id"] == selected_sale_id].iloc[0]
-                    mapping, options = get_item_options()
-                    item_index = options.index(sale_row["item_name"]) if sale_row["item_name"] in options else 0
-                    with st.form("goods_sale_edit_form"):
-                        edit_sale_date = st.date_input(_("Date"), value=as_date(sale_row["sale_date"]), key="edit_goods_sale_date")
-                        edit_item_label = st.selectbox(_("Name"), options, index=item_index, key="edit_goods_sale_item")
-                        c1, c2, c3 = st.columns(3)
-                        edit_selling_price = c1.number_input(_("Selling Price"), min_value=0.0, value=float(sale_row["selling_price"]), step=100.0, key="edit_goods_sale_price")
-                        edit_quantity = c2.number_input(_("Quantity"), min_value=0.0, value=float(sale_row["quantity"]), step=1.0, key="edit_goods_sale_qty")
-                        c3.metric(_("Total"), money(edit_selling_price * edit_quantity))
-                        save_changes = st.form_submit_button(_("Save Changes"))
-                    if save_changes:
-                        try:
-                            if edit_selling_price <= 0 or edit_quantity <= 0:
-                                st.error(_("Selling price and quantity must be greater than zero."))
-                            else:
-                                update_goods_sale_record(selected_sale_id, edit_sale_date, mapping[edit_item_label], edit_selling_price, edit_quantity)
-                                st.session_state.pop("goods_sale_edit_id", None)
-                                st.success(_("Record updated."))
-                                st.rerun()
-                        except ValueError as exc:
-                            st.error(_(str(exc)))
-
-                selected_delete_sale_id = st.session_state.get("goods_sale_delete_id")
-                if selected_delete_sale_id:
-                    with st.form("goods_sale_delete_form"):
-                        confirm_delete = st.checkbox(_("Confirm Delete"), key="confirm_goods_sale_delete")
-                        delete_record = st.form_submit_button(_("Delete Record"))
-                    if delete_record:
-                        try:
-                            if confirm_delete:
-                                delete_goods_sale_record(selected_delete_sale_id)
-                                st.session_state.pop("goods_sale_delete_id", None)
-                                st.success(_("Record deleted."))
-                                st.rerun()
-                        except ValueError as exc:
-                            st.error(_(str(exc)))
-        else:
-            editable_service_sales = query_df("""
-                SELECT service_sale_id, sale_date, service_name, selling_price,
-                       quantity, total_amount, created_at
-                FROM service_sales
-                ORDER BY created_at DESC
-            """)
-            if editable_service_sales.empty:
-                st.info(_("No records available."))
-            else:
-                render_action_rows(
-                    editable_service_sales,
-                    "service_sale_id",
-                    [
-                        ("Date", "sale_date", None),
-                        ("Name", "service_name", None),
-                        ("Selling Price", "selling_price", money),
-                        ("Quantity", "quantity", None),
-                        ("Total", "total_amount", money),
-                    ],
-                    "service_sale",
-                )
-
-                selected_service_id = st.session_state.get("service_sale_edit_id")
-                if selected_service_id:
-                    service_row = editable_service_sales[editable_service_sales["service_sale_id"] == selected_service_id].iloc[0]
-                    with st.form("service_sale_edit_form"):
-                        c1, c2 = st.columns(2)
-                        edit_service_date = c1.date_input(_("Date"), value=as_date(service_row["sale_date"]), key="edit_service_sale_date")
-                        edit_service_name = c2.text_input(_("Name"), value=service_row["service_name"], key="edit_service_sale_name")
-                        c3, c4, c5 = st.columns(3)
-                        edit_service_price = c3.number_input(_("Selling Price"), min_value=0.0, value=float(service_row["selling_price"]), step=100.0, key="edit_service_sale_price")
-                        edit_service_quantity = c4.number_input(_("Quantity"), min_value=0.0, value=float(service_row["quantity"]), step=1.0, key="edit_service_sale_qty")
-                        c5.metric(_("Total"), money(edit_service_price * edit_service_quantity))
-                        save_changes = st.form_submit_button(_("Save Changes"))
-                    if save_changes:
-                        if not edit_service_name.strip():
-                            st.error(_("Name is required."))
-                        elif edit_service_price <= 0 or edit_service_quantity <= 0:
-                            st.error(_("Selling price and quantity must be greater than zero."))
-                        else:
-                            update_service_sale_record(selected_service_id, edit_service_date, edit_service_name.strip(), edit_service_price, edit_service_quantity)
-                            st.session_state.pop("service_sale_edit_id", None)
-                            st.success(_("Record updated."))
-                            st.rerun()
-
-                selected_delete_service_id = st.session_state.get("service_sale_delete_id")
-                if selected_delete_service_id:
-                    with st.form("service_sale_delete_form"):
-                        confirm_delete = st.checkbox(_("Confirm Delete"), key="confirm_service_sale_delete")
-                        delete_record = st.form_submit_button(_("Delete Record"))
-                    if delete_record and confirm_delete:
-                        delete_service_sale_record(selected_delete_service_id)
-                        st.session_state.pop("service_sale_delete_id", None)
-                        st.success(_("Record deleted."))
-                        st.rerun()
+        selected_delete_service_id = st.session_state.get("service_sale_delete_id")
+        if selected_delete_service_id:
+            with st.form("service_sale_delete_form"):
+                confirm_delete = st.checkbox(_("Confirm Delete"), key="confirm_service_sale_delete")
+                delete_record = st.form_submit_button(_("Delete Record"))
+            if delete_record and confirm_delete:
+                delete_service_sale_record(selected_delete_service_id)
+                st.session_state.pop("service_sale_delete_id", None)
+                st.success(_("Record deleted."))
+                st.rerun()
 
 # Expenses
 elif menu == "Expenses":
