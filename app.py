@@ -872,24 +872,25 @@ def render_login_styles():
             display: none;
         }
         [data-testid="stAppViewContainer"] {
-            background: #f8fafc;
+            background: var(--background-color);
         }
         .block-container {
             max-width: 600px;
             padding-top: 7vh;
         }
         div[data-testid="stForm"] {
-            background: #ffffff;
-            border: 1px solid #dbe4ef;
+            background: var(--secondary-background-color);
+            border: 1px solid rgba(148, 163, 184, 0.35);
             border-top: 0;
             border-radius: 0 0 14px 14px;
             margin-top: -1rem;
             padding: 1rem 32px 32px 32px;
             box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
+            color: var(--text-color);
         }
         .login-card-head {
-            background: #ffffff;
-            border: 1px solid #dbe4ef;
+            background: var(--secondary-background-color);
+            border: 1px solid rgba(148, 163, 184, 0.35);
             border-bottom: 0;
             border-radius: 14px 14px 0 0;
             padding: 32px 32px 0 32px;
@@ -914,7 +915,8 @@ def render_login_styles():
         div[data-testid="stTextInput"] input {
             min-height: 40px;
             border-radius: 10px;
-            background: #eaf2ff;
+            background: var(--background-color);
+            color: var(--text-color);
         }
         div[data-testid="stForm"] div[data-baseweb="input"] button {
             width: 1.5rem;
@@ -923,7 +925,7 @@ def render_login_styles():
             padding: 0;
             background: transparent;
             border: 0;
-            color: #64748b;
+            color: var(--text-color);
         }
         div[data-testid="stForm"] div[data-baseweb="input"] button svg {
             width: 14px;
@@ -948,21 +950,21 @@ def render_login_styles():
         .login-title {
             font-size: 18px;
             font-weight: 800;
-            color: #0f172a;
+            color: var(--text-color);
             line-height: 1.1;
         }
         .login-subtitle {
-            color: #64748b;
+            color: var(--text-color);
             font-size: 13px;
         }
         .login-heading {
             font-size: 25px;
             font-weight: 800;
-            color: #0f172a;
+            color: var(--text-color);
             margin-bottom: 6px;
         }
         .login-helper {
-            color: #64748b;
+            color: var(--text-color);
             margin-bottom: 24px;
         }
         div[data-testid="stForm"] > div:first-child {
@@ -1046,7 +1048,7 @@ def require_clocked_in():
     st.stop()
 
 
-def render_action_rows(df, id_column, display_columns, key_prefix):
+def render_action_rows_legacy(df, id_column, display_columns, key_prefix):
     header_columns = st.columns([1.2] * len(display_columns) + [0.7])
     for column, (label, field_name, formatter) in zip(header_columns, display_columns):
         column.caption(_(label).upper())
@@ -1074,6 +1076,36 @@ def render_action_rows(df, id_column, display_columns, key_prefix):
         else:
             edit_column.write("")
             delete_column.write("")
+
+    for state_key in (f"{key_prefix}_edit_id", f"{key_prefix}_delete_id"):
+        if st.session_state.get(state_key) not in valid_ids:
+            st.session_state.pop(state_key, None)
+
+
+def render_action_rows(df, id_column, display_columns, key_prefix):
+    valid_ids = set()
+    for row in df.to_dict("records"):
+        record_id = int(row[id_column])
+        valid_ids.add(record_id)
+        with st.container(border=True):
+            for start in range(0, len(display_columns), 3):
+                row_columns = st.columns(min(3, len(display_columns) - start))
+                for column, (label, field, formatter) in zip(row_columns, display_columns[start:start + 3]):
+                    value = row[field]
+                    column.caption(_(label).upper())
+                    column.write(formatter(value) if formatter else value)
+
+            if is_editable_record(row):
+                st.caption(_("Actions").upper())
+                edit_column, delete_column, spacer_column = st.columns([1, 1, 8])
+                if edit_column.button("Edit", key=f"{key_prefix}_edit_{record_id}", help=_("Edit")):
+                    st.session_state[f"{key_prefix}_edit_id"] = record_id
+                    st.session_state.pop(f"{key_prefix}_delete_id", None)
+                    st.rerun()
+                if delete_column.button("Delete", key=f"{key_prefix}_delete_{record_id}", help=_("Delete")):
+                    st.session_state[f"{key_prefix}_delete_id"] = record_id
+                    st.session_state.pop(f"{key_prefix}_edit_id", None)
+                    st.rerun()
 
     for state_key in (f"{key_prefix}_edit_id", f"{key_prefix}_delete_id"):
         if st.session_state.get(state_key) not in valid_ids:
