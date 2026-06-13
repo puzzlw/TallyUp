@@ -175,7 +175,6 @@ def money(x):
 
 TRANSLATIONS = {
     "TallyUp": "TallyUp",
-    "A simple stock, sales, expense, and profit tracker for a small stationery business.": "Mfumo rahisi wa kufuatilia stock, mauzo, matumizi, na faida kwa biashara ndogo ya stationery.",
     "Menu": "Menyu",
     "Dashboard": "Dashibodi",
     "Inventory/Stock": "Bidhaa/Stock",
