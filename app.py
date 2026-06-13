@@ -154,6 +154,185 @@ def execute(sql, params=()):
         release_conn(conn)
 
 
+def run_transaction(callback):
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        result = callback(cur)
+        conn.commit()
+        st.cache_data.clear()
+        return result
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        release_conn(conn)
+
+
+def editable_window_clause(alias=None):
+    prefix = f"{alias}." if alias else ""
+    return f"{prefix}created_at::timestamptz >= now() - interval '24 hours'"
+
+
+def get_or_create_item(cur, item_name, buying_price=0):
+    cur.execute("SELECT item_id FROM items WHERE item_name = %s", (item_name,))
+    existing = cur.fetchone()
+    if existing:
+        item_id = existing[0]
+        cur.execute("UPDATE items SET buying_price=%s WHERE item_id=%s", (buying_price, item_id))
+        return item_id
+
+    cur.execute(
+        """
+        INSERT INTO items (item_name, buying_price, current_stock)
+        VALUES (%s, %s, %s)
+        RETURNING item_id
+        """,
+        (item_name, buying_price, 0),
+    )
+    return cur.fetchone()[0]
+
+
+def require_recent(cur, table, id_column, record_id):
+    cur.execute(
+        f"""
+        SELECT 1 FROM {table}
+        WHERE {id_column} = %s AND {editable_window_clause()}
+        """,
+        (record_id,),
+    )
+    if not cur.fetchone():
+        raise ValueError("This record can only be edited or deleted within 24 hours.")
+
+
+def remove_stock(cur, item_id, quantity):
+    cur.execute(
+        """
+        UPDATE items
+        SET current_stock = current_stock - %s
+        WHERE item_id = %s AND current_stock >= %s
+        RETURNING item_id
+        """,
+        (quantity, item_id, quantity),
+    )
+    if not cur.fetchone():
+        raise ValueError("This change would make stock negative.")
+
+
+def add_stock(cur, item_id, quantity):
+    cur.execute(
+        "UPDATE items SET current_stock = current_stock + %s WHERE item_id = %s",
+        (quantity, item_id),
+    )
+
+
+def update_purchase_record(purchase_id, purchase_date, item_name, buying_price, quantity):
+    total_cost = buying_price * quantity
+
+    def work(cur):
+        require_recent(cur, "purchases", "purchase_id", purchase_id)
+        cur.execute("SELECT item_id, quantity FROM purchases WHERE purchase_id=%s", (purchase_id,))
+        old_item_id, old_quantity = cur.fetchone()
+        remove_stock(cur, old_item_id, old_quantity)
+        new_item_id = get_or_create_item(cur, item_name, buying_price)
+        add_stock(cur, new_item_id, quantity)
+        cur.execute(
+            """
+            UPDATE purchases
+            SET purchase_date=%s, item_id=%s, quantity=%s, buying_price=%s, total_cost=%s
+            WHERE purchase_id=%s
+            """,
+            (str(purchase_date), new_item_id, quantity, buying_price, total_cost, purchase_id),
+        )
+
+    run_transaction(work)
+
+
+def delete_purchase_record(purchase_id):
+    def work(cur):
+        require_recent(cur, "purchases", "purchase_id", purchase_id)
+        cur.execute("SELECT item_id, quantity FROM purchases WHERE purchase_id=%s", (purchase_id,))
+        item_id, quantity = cur.fetchone()
+        remove_stock(cur, item_id, quantity)
+        cur.execute("DELETE FROM purchases WHERE purchase_id=%s", (purchase_id,))
+
+    run_transaction(work)
+
+
+def update_goods_sale_record(sale_id, sale_date, item_id, selling_price, quantity):
+    def work(cur):
+        require_recent(cur, "sales", "sale_id", sale_id)
+        cur.execute("SELECT item_id, quantity FROM sales WHERE sale_id=%s", (sale_id,))
+        old_item_id, old_quantity = cur.fetchone()
+        add_stock(cur, old_item_id, old_quantity)
+        remove_stock(cur, item_id, quantity)
+        cur.execute("SELECT buying_price FROM items WHERE item_id=%s", (item_id,))
+        buying_price = float(cur.fetchone()[0])
+        total_amount = selling_price * quantity
+        estimated_profit = (selling_price - buying_price) * quantity
+        cur.execute(
+            """
+            UPDATE sales
+            SET sale_date=%s, item_id=%s, quantity=%s, selling_price=%s,
+                total_amount=%s, estimated_profit=%s
+            WHERE sale_id=%s
+            """,
+            (str(sale_date), item_id, quantity, selling_price, total_amount, estimated_profit, sale_id),
+        )
+        cur.execute("UPDATE items SET selling_price=%s WHERE item_id=%s", (selling_price, item_id))
+
+    run_transaction(work)
+
+
+def delete_goods_sale_record(sale_id):
+    def work(cur):
+        require_recent(cur, "sales", "sale_id", sale_id)
+        cur.execute("SELECT item_id, quantity FROM sales WHERE sale_id=%s", (sale_id,))
+        item_id, quantity = cur.fetchone()
+        add_stock(cur, item_id, quantity)
+        cur.execute("DELETE FROM sales WHERE sale_id=%s", (sale_id,))
+
+    run_transaction(work)
+
+
+def update_service_sale_record(service_sale_id, sale_date, service_name, selling_price, quantity):
+    total_amount = selling_price * quantity
+    execute(
+        f"""
+        UPDATE service_sales
+        SET sale_date=%s, service_name=%s, selling_price=%s, quantity=%s, total_amount=%s
+        WHERE service_sale_id=%s AND {editable_window_clause()}
+        """,
+        (str(sale_date), service_name, selling_price, quantity, total_amount, service_sale_id),
+    )
+
+
+def delete_service_sale_record(service_sale_id):
+    execute(
+        f"DELETE FROM service_sales WHERE service_sale_id=%s AND {editable_window_clause()}",
+        (service_sale_id,),
+    )
+
+
+def update_expense_record(expense_id, expense_date, expense_name, amount, remarks):
+    execute(
+        f"""
+        UPDATE expenses
+        SET expense_date=%s, expense_name=%s, amount=%s, remarks=%s
+        WHERE expense_id=%s AND {editable_window_clause()}
+        """,
+        (str(expense_date), expense_name, amount, remarks, expense_id),
+    )
+
+
+def delete_expense_record(expense_id):
+    execute(
+        f"DELETE FROM expenses WHERE expense_id=%s AND {editable_window_clause()}",
+        (expense_id,),
+    )
+
+
 def get_items_df():
     return query_df("SELECT * FROM items ORDER BY item_name")
 
@@ -171,6 +350,10 @@ def money(x):
         return f"{float(x):,.0f}"
     except Exception:
         return "0"
+
+
+def as_date(value):
+    return pd.to_datetime(value).date()
 
 
 TRANSLATIONS = {
@@ -242,6 +425,17 @@ TRANSLATIONS = {
     "Fast Moving Items": "Bidhaa Zinazouzwa Haraka",
     "Download your business records as Excel files.": "Pakua rekodi za biashara yako kama faili la Excel.",
     "Download Excel Export": "Pakua Excel",
+    "Corrections": "Marekebisho",
+    "Records can be edited or deleted for 24 hours after they are added.": "Rekodi zinaweza kuhaririwa au kufutwa ndani ya saa 24 baada ya kuongezwa.",
+    "Select Record": "Chagua Rekodi",
+    "Save Changes": "Hifadhi Mabadiliko",
+    "Delete Record": "Futa Rekodi",
+    "Record updated.": "Rekodi imesasishwa.",
+    "Record deleted.": "Rekodi imefutwa.",
+    "No records available for correction.": "Hakuna rekodi zinazoweza kurekebishwa.",
+    "Confirm Delete": "Thibitisha Kufuta",
+    "This record can only be edited or deleted within 24 hours.": "Rekodi hii inaweza kuhaririwa au kufutwa ndani ya saa 24 pekee.",
+    "This change would make stock negative.": "Mabadiliko haya yatafanya stock iwe hasi.",
     "date": "tarehe",
     "name": "jina",
     "quantity": "idadi",
@@ -451,6 +645,57 @@ elif menu == "Inventory/Stock":
     """)
     st.dataframe(localize_df(purchases), use_container_width=True, hide_index=True)
 
+    with st.expander(_("Corrections")):
+        st.caption(_("Records can be edited or deleted for 24 hours after they are added."))
+        editable_purchases = query_df(f"""
+            SELECT p.purchase_id, p.purchase_date, i.item_name, p.buying_price,
+                   p.quantity, p.total_cost, p.created_at
+            FROM purchases p JOIN items i ON i.item_id = p.item_id
+            WHERE {editable_window_clause('p')}
+            ORDER BY p.created_at DESC
+        """)
+        if editable_purchases.empty:
+            st.info(_("No records available for correction."))
+        else:
+            purchase_options = {
+                f"{row.purchase_date} - {row.item_name} - {money(row.total_cost)}": int(row.purchase_id)
+                for row in editable_purchases.itertuples()
+            }
+            selected_purchase_label = st.selectbox(_("Select Record"), list(purchase_options.keys()), key="purchase_correction_select")
+            selected_purchase_id = purchase_options[selected_purchase_label]
+            purchase_row = editable_purchases[editable_purchases["purchase_id"] == selected_purchase_id].iloc[0]
+            with st.form("purchase_correction_form"):
+                c1, c2 = st.columns(2)
+                edit_purchase_date = c1.date_input(_("Date"), value=as_date(purchase_row["purchase_date"]), key="edit_purchase_date")
+                edit_item_name = c2.text_input(_("Item Name"), value=purchase_row["item_name"], key="edit_purchase_item")
+                c3, c4, c5 = st.columns(3)
+                edit_buying_price = c3.number_input(_("Buying Price"), min_value=0.0, value=float(purchase_row["buying_price"]), step=100.0, key="edit_purchase_buy")
+                edit_quantity = c4.number_input(_("Quantity"), min_value=0.0, value=float(purchase_row["quantity"]), step=1.0, key="edit_purchase_qty")
+                c5.metric(_("Total Cost"), money(edit_buying_price * edit_quantity))
+                save_changes = st.form_submit_button(_("Save Changes"))
+            if save_changes:
+                try:
+                    if not edit_item_name.strip() or edit_buying_price <= 0 or edit_quantity <= 0:
+                        st.error(_("Buying price and quantity must be greater than zero."))
+                    else:
+                        update_purchase_record(selected_purchase_id, edit_purchase_date, edit_item_name.strip(), edit_buying_price, edit_quantity)
+                        st.success(_("Record updated."))
+                        st.rerun()
+                except ValueError as exc:
+                    st.error(_(str(exc)))
+
+            with st.form("purchase_delete_form"):
+                confirm_delete = st.checkbox(_("Confirm Delete"), key="confirm_purchase_delete")
+                delete_record = st.form_submit_button(_("Delete Record"))
+            if delete_record:
+                try:
+                    if confirm_delete:
+                        delete_purchase_record(selected_purchase_id)
+                        st.success(_("Record deleted."))
+                        st.rerun()
+                except ValueError as exc:
+                    st.error(_(str(exc)))
+
 # Sales
 elif menu == "Sales":
     st.subheader(_("Sales"))
@@ -557,6 +802,108 @@ elif menu == "Sales":
     """)
     st.dataframe(localize_df(service_sales), use_container_width=True, hide_index=True)
 
+    with st.expander(_("Corrections")):
+        st.caption(_("Records can be edited or deleted for 24 hours after they are added."))
+        correction_type_options = {_("Goods"): "Goods", _("Service"): "Service"}
+        correction_type = correction_type_options[
+            st.radio(_("Sale Type"), list(correction_type_options.keys()), horizontal=True, key="sale_correction_type")
+        ]
+
+        if correction_type == "Goods":
+            editable_sales = query_df(f"""
+                SELECT s.sale_id, s.sale_date, s.item_id, i.item_name, s.quantity,
+                       s.selling_price, s.total_amount, s.created_at
+                FROM sales s JOIN items i ON i.item_id = s.item_id
+                WHERE {editable_window_clause('s')}
+                ORDER BY s.created_at DESC
+            """)
+            if editable_sales.empty:
+                st.info(_("No records available for correction."))
+            else:
+                sale_options = {
+                    f"{row.sale_date} - {row.item_name} - {money(row.total_amount)}": int(row.sale_id)
+                    for row in editable_sales.itertuples()
+                }
+                selected_sale_label = st.selectbox(_("Select Record"), list(sale_options.keys()), key="goods_sale_correction_select")
+                selected_sale_id = sale_options[selected_sale_label]
+                sale_row = editable_sales[editable_sales["sale_id"] == selected_sale_id].iloc[0]
+                mapping, options = get_item_options()
+                item_index = options.index(sale_row["item_name"]) if sale_row["item_name"] in options else 0
+                with st.form("goods_sale_correction_form"):
+                    edit_sale_date = st.date_input(_("Date"), value=as_date(sale_row["sale_date"]), key="edit_goods_sale_date")
+                    edit_item_label = st.selectbox(_("Name"), options, index=item_index, key="edit_goods_sale_item")
+                    c1, c2, c3 = st.columns(3)
+                    edit_selling_price = c1.number_input(_("Selling Price"), min_value=0.0, value=float(sale_row["selling_price"]), step=100.0, key="edit_goods_sale_price")
+                    edit_quantity = c2.number_input(_("Quantity"), min_value=0.0, value=float(sale_row["quantity"]), step=1.0, key="edit_goods_sale_qty")
+                    c3.metric(_("Total"), money(edit_selling_price * edit_quantity))
+                    save_changes = st.form_submit_button(_("Save Changes"))
+                if save_changes:
+                    try:
+                        if edit_selling_price <= 0 or edit_quantity <= 0:
+                            st.error(_("Selling price and quantity must be greater than zero."))
+                        else:
+                            update_goods_sale_record(selected_sale_id, edit_sale_date, mapping[edit_item_label], edit_selling_price, edit_quantity)
+                            st.success(_("Record updated."))
+                            st.rerun()
+                    except ValueError as exc:
+                        st.error(_(str(exc)))
+
+                with st.form("goods_sale_delete_form"):
+                    confirm_delete = st.checkbox(_("Confirm Delete"), key="confirm_goods_sale_delete")
+                    delete_record = st.form_submit_button(_("Delete Record"))
+                if delete_record:
+                    try:
+                        if confirm_delete:
+                            delete_goods_sale_record(selected_sale_id)
+                            st.success(_("Record deleted."))
+                            st.rerun()
+                    except ValueError as exc:
+                        st.error(_(str(exc)))
+        else:
+            editable_service_sales = query_df(f"""
+                SELECT service_sale_id, sale_date, service_name, selling_price,
+                       quantity, total_amount, created_at
+                FROM service_sales
+                WHERE {editable_window_clause()}
+                ORDER BY created_at DESC
+            """)
+            if editable_service_sales.empty:
+                st.info(_("No records available for correction."))
+            else:
+                service_options = {
+                    f"{row.sale_date} - {row.service_name} - {money(row.total_amount)}": int(row.service_sale_id)
+                    for row in editable_service_sales.itertuples()
+                }
+                selected_service_label = st.selectbox(_("Select Record"), list(service_options.keys()), key="service_sale_correction_select")
+                selected_service_id = service_options[selected_service_label]
+                service_row = editable_service_sales[editable_service_sales["service_sale_id"] == selected_service_id].iloc[0]
+                with st.form("service_sale_correction_form"):
+                    c1, c2 = st.columns(2)
+                    edit_service_date = c1.date_input(_("Date"), value=as_date(service_row["sale_date"]), key="edit_service_sale_date")
+                    edit_service_name = c2.text_input(_("Name"), value=service_row["service_name"], key="edit_service_sale_name")
+                    c3, c4, c5 = st.columns(3)
+                    edit_service_price = c3.number_input(_("Selling Price"), min_value=0.0, value=float(service_row["selling_price"]), step=100.0, key="edit_service_sale_price")
+                    edit_service_quantity = c4.number_input(_("Quantity"), min_value=0.0, value=float(service_row["quantity"]), step=1.0, key="edit_service_sale_qty")
+                    c5.metric(_("Total"), money(edit_service_price * edit_service_quantity))
+                    save_changes = st.form_submit_button(_("Save Changes"))
+                if save_changes:
+                    if not edit_service_name.strip():
+                        st.error(_("Name is required."))
+                    elif edit_service_price <= 0 or edit_service_quantity <= 0:
+                        st.error(_("Selling price and quantity must be greater than zero."))
+                    else:
+                        update_service_sale_record(selected_service_id, edit_service_date, edit_service_name.strip(), edit_service_price, edit_service_quantity)
+                        st.success(_("Record updated."))
+                        st.rerun()
+
+                with st.form("service_sale_delete_form"):
+                    confirm_delete = st.checkbox(_("Confirm Delete"), key="confirm_service_sale_delete")
+                    delete_record = st.form_submit_button(_("Delete Record"))
+                if delete_record and confirm_delete:
+                    delete_service_sale_record(selected_service_id)
+                    st.success(_("Record deleted."))
+                    st.rerun()
+
 # Expenses
 elif menu == "Expenses":
     st.subheader(_("Record Expense"))
@@ -580,6 +927,47 @@ elif menu == "Expenses":
     st.subheader(_("Recent Expenses"))
     df = query_df("SELECT * FROM expenses ORDER BY expense_date DESC, expense_id DESC LIMIT 100")
     st.dataframe(localize_df(df), use_container_width=True, hide_index=True)
+
+    with st.expander(_("Corrections")):
+        st.caption(_("Records can be edited or deleted for 24 hours after they are added."))
+        editable_expenses = query_df(f"""
+            SELECT expense_id, expense_date, expense_name, amount, remarks, created_at
+            FROM expenses
+            WHERE {editable_window_clause()}
+            ORDER BY created_at DESC
+        """)
+        if editable_expenses.empty:
+            st.info(_("No records available for correction."))
+        else:
+            expense_options = {
+                f"{row.expense_date} - {row.expense_name} - {money(row.amount)}": int(row.expense_id)
+                for row in editable_expenses.itertuples()
+            }
+            selected_expense_label = st.selectbox(_("Select Record"), list(expense_options.keys()), key="expense_correction_select")
+            selected_expense_id = expense_options[selected_expense_label]
+            expense_row = editable_expenses[editable_expenses["expense_id"] == selected_expense_id].iloc[0]
+            with st.form("expense_correction_form"):
+                c1, c2 = st.columns(2)
+                edit_expense_date = c1.date_input(_("Expense Date"), value=as_date(expense_row["expense_date"]), key="edit_expense_date")
+                edit_expense_name = c2.text_input(_("Expense Name"), value=expense_row["expense_name"], key="edit_expense_name")
+                edit_amount = st.number_input(_("Amount"), min_value=0.0, value=float(expense_row["amount"]), step=100.0, key="edit_expense_amount")
+                edit_remarks = st.text_area(_("Remarks"), value=expense_row["remarks"] or "", key="edit_expense_remarks")
+                save_changes = st.form_submit_button(_("Save Changes"))
+            if save_changes:
+                if not edit_expense_name.strip() or edit_amount <= 0:
+                    st.error(_("Expense name and amount are required."))
+                else:
+                    update_expense_record(selected_expense_id, edit_expense_date, edit_expense_name.strip(), edit_amount, edit_remarks)
+                    st.success(_("Record updated."))
+                    st.rerun()
+
+            with st.form("expense_delete_form"):
+                confirm_delete = st.checkbox(_("Confirm Delete"), key="confirm_expense_delete")
+                delete_record = st.form_submit_button(_("Delete Record"))
+            if delete_record and confirm_delete:
+                delete_expense_record(selected_expense_id)
+                st.success(_("Record deleted."))
+                st.rerun()
 
 # Reports
 elif menu == "Reports":
