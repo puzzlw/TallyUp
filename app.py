@@ -553,7 +553,7 @@ def render_login_styles():
             background: #f8fafc;
         }
         .block-container {
-            max-width: 450px;
+            max-width: 600px;
             padding-top: 7vh;
         }
         div[data-testid="stForm"] {
@@ -561,7 +561,8 @@ def render_login_styles():
             border: 1px solid #dbe4ef;
             border-top: 0;
             border-radius: 0 0 14px 14px;
-            padding: 0 32px 32px 32px;
+            margin-top: -1rem;
+            padding: 1rem 32px 32px 32px;
             box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
         }
         .login-card-head {
@@ -570,14 +571,14 @@ def render_login_styles():
             border-bottom: 0;
             border-radius: 14px 14px 0 0;
             padding: 32px 32px 0 32px;
-            box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
+            margin-bottom: 0;
         }
         .login-card-head [data-testid="column"]:last-child {
             display: flex;
             justify-content: flex-end;
         }
         .login-card-head [data-testid="stSelectbox"] {
-            max-width: 125px;
+            max-width: 130px;
         }
         div[data-testid="stFormSubmitButton"] button {
             width: 100%;
