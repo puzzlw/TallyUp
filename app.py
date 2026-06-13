@@ -189,6 +189,32 @@ def get_or_create_item(cur, item_name, buying_price=0):
     return cur.fetchone()[0]
 
 
+def editable_window_clause(alias=None):
+    prefix = f"{alias}." if alias else ""
+    return f"{prefix}created_at::timestamptz >= now() - interval '24 hours'"
+
+
+def is_editable_record(row):
+    created_at = row.get("created_at")
+    if not created_at:
+        return False
+    created_at = pd.to_datetime(created_at, utc=True)
+    return created_at >= pd.Timestamp.now(tz="UTC") - pd.Timedelta(hours=24)
+
+
+def require_editable_record(cur, table, id_column, record_id):
+    cur.execute(
+        f"""
+        SELECT 1
+        FROM {table}
+        WHERE {id_column} = %s AND {editable_window_clause()}
+        """,
+        (record_id,),
+    )
+    if not cur.fetchone():
+        raise ValueError("This record can only be edited or deleted within 24 hours.")
+
+
 def remove_stock(cur, item_id, quantity):
     cur.execute(
         """
@@ -214,6 +240,7 @@ def update_purchase_record(purchase_id, purchase_date, item_name, buying_price, 
     total_cost = buying_price * quantity
 
     def work(cur):
+        require_editable_record(cur, "purchases", "purchase_id", purchase_id)
         cur.execute("SELECT item_id, quantity FROM purchases WHERE purchase_id=%s", (purchase_id,))
         old_item_id, old_quantity = cur.fetchone()
         remove_stock(cur, old_item_id, old_quantity)
@@ -233,6 +260,7 @@ def update_purchase_record(purchase_id, purchase_date, item_name, buying_price, 
 
 def delete_purchase_record(purchase_id):
     def work(cur):
+        require_editable_record(cur, "purchases", "purchase_id", purchase_id)
         cur.execute("SELECT item_id, quantity FROM purchases WHERE purchase_id=%s", (purchase_id,))
         item_id, quantity = cur.fetchone()
         remove_stock(cur, item_id, quantity)
@@ -243,6 +271,7 @@ def delete_purchase_record(purchase_id):
 
 def update_goods_sale_record(sale_id, sale_date, item_id, selling_price, quantity):
     def work(cur):
+        require_editable_record(cur, "sales", "sale_id", sale_id)
         cur.execute("SELECT item_id, quantity FROM sales WHERE sale_id=%s", (sale_id,))
         old_item_id, old_quantity = cur.fetchone()
         add_stock(cur, old_item_id, old_quantity)
@@ -267,6 +296,7 @@ def update_goods_sale_record(sale_id, sale_date, item_id, selling_price, quantit
 
 def delete_goods_sale_record(sale_id):
     def work(cur):
+        require_editable_record(cur, "sales", "sale_id", sale_id)
         cur.execute("SELECT item_id, quantity FROM sales WHERE sale_id=%s", (sale_id,))
         item_id, quantity = cur.fetchone()
         add_stock(cur, item_id, quantity)
@@ -277,39 +307,49 @@ def delete_goods_sale_record(sale_id):
 
 def update_service_sale_record(service_sale_id, sale_date, service_name, selling_price, quantity):
     total_amount = selling_price * quantity
-    execute(
-        """
-        UPDATE service_sales
-        SET sale_date=%s, service_name=%s, selling_price=%s, quantity=%s, total_amount=%s
-        WHERE service_sale_id=%s
-        """,
-        (str(sale_date), service_name, selling_price, quantity, total_amount, service_sale_id),
-    )
+    def work(cur):
+        require_editable_record(cur, "service_sales", "service_sale_id", service_sale_id)
+        cur.execute(
+            """
+            UPDATE service_sales
+            SET sale_date=%s, service_name=%s, selling_price=%s, quantity=%s, total_amount=%s
+            WHERE service_sale_id=%s
+            """,
+            (str(sale_date), service_name, selling_price, quantity, total_amount, service_sale_id),
+        )
+
+    run_transaction(work)
 
 
 def delete_service_sale_record(service_sale_id):
-    execute(
-        "DELETE FROM service_sales WHERE service_sale_id=%s",
-        (service_sale_id,),
-    )
+    def work(cur):
+        require_editable_record(cur, "service_sales", "service_sale_id", service_sale_id)
+        cur.execute("DELETE FROM service_sales WHERE service_sale_id=%s", (service_sale_id,))
+
+    run_transaction(work)
 
 
 def update_expense_record(expense_id, expense_date, expense_name, amount, remarks):
-    execute(
-        """
-        UPDATE expenses
-        SET expense_date=%s, expense_name=%s, amount=%s, remarks=%s
-        WHERE expense_id=%s
-        """,
-        (str(expense_date), expense_name, amount, remarks, expense_id),
-    )
+    def work(cur):
+        require_editable_record(cur, "expenses", "expense_id", expense_id)
+        cur.execute(
+            """
+            UPDATE expenses
+            SET expense_date=%s, expense_name=%s, amount=%s, remarks=%s
+            WHERE expense_id=%s
+            """,
+            (str(expense_date), expense_name, amount, remarks, expense_id),
+        )
+
+    run_transaction(work)
 
 
 def delete_expense_record(expense_id):
-    execute(
-        "DELETE FROM expenses WHERE expense_id=%s",
-        (expense_id,),
-    )
+    def work(cur):
+        require_editable_record(cur, "expenses", "expense_id", expense_id)
+        cur.execute("DELETE FROM expenses WHERE expense_id=%s", (expense_id,))
+
+    run_transaction(work)
 
 
 def get_items_df():
@@ -415,6 +455,7 @@ TRANSLATIONS = {
     "Record deleted.": "Rekodi imefutwa.",
     "No records available.": "Hakuna rekodi zilizopo.",
     "Confirm Delete": "Thibitisha Kufuta",
+    "This record can only be edited or deleted within 24 hours.": "Rekodi hii inaweza kuhaririwa au kufutwa ndani ya saa 24 pekee.",
     "This change would make stock negative.": "Mabadiliko haya yatafanya stock iwe hasi.",
     "date": "tarehe",
     "name": "jina",
@@ -474,14 +515,18 @@ def render_action_rows(df, id_column, display_columns, key_prefix):
             column.write(formatter(value) if formatter else value)
 
         edit_column, delete_column = row_columns[-1].columns(2)
-        if edit_column.button("✎", key=f"{key_prefix}_edit_{record_id}", help=_("Edit")):
-            st.session_state[f"{key_prefix}_edit_id"] = record_id
-            st.session_state.pop(f"{key_prefix}_delete_id", None)
-            st.rerun()
-        if delete_column.button("🗑", key=f"{key_prefix}_delete_{record_id}", help=_("Delete")):
-            st.session_state[f"{key_prefix}_delete_id"] = record_id
-            st.session_state.pop(f"{key_prefix}_edit_id", None)
-            st.rerun()
+        if is_editable_record(row):
+            if edit_column.button("✎", key=f"{key_prefix}_edit_{record_id}", help=_("Edit")):
+                st.session_state[f"{key_prefix}_edit_id"] = record_id
+                st.session_state.pop(f"{key_prefix}_delete_id", None)
+                st.rerun()
+            if delete_column.button("🗑", key=f"{key_prefix}_delete_{record_id}", help=_("Delete")):
+                st.session_state[f"{key_prefix}_delete_id"] = record_id
+                st.session_state.pop(f"{key_prefix}_edit_id", None)
+                st.rerun()
+        else:
+            edit_column.write("")
+            delete_column.write("")
 
     for state_key in (f"{key_prefix}_edit_id", f"{key_prefix}_delete_id"):
         if st.session_state.get(state_key) not in valid_ids:
@@ -900,10 +945,13 @@ elif menu == "Sales":
                 elif edit_service_price <= 0 or edit_service_quantity <= 0:
                     st.error(_("Selling price and quantity must be greater than zero."))
                 else:
-                    update_service_sale_record(selected_service_id, edit_service_date, edit_service_name.strip(), edit_service_price, edit_service_quantity)
-                    st.session_state.pop("service_sale_edit_id", None)
-                    st.success(_("Record updated."))
-                    st.rerun()
+                    try:
+                        update_service_sale_record(selected_service_id, edit_service_date, edit_service_name.strip(), edit_service_price, edit_service_quantity)
+                        st.session_state.pop("service_sale_edit_id", None)
+                        st.success(_("Record updated."))
+                        st.rerun()
+                    except ValueError as exc:
+                        st.error(_(str(exc)))
 
         selected_delete_service_id = st.session_state.get("service_sale_delete_id")
         if selected_delete_service_id:
@@ -911,10 +959,13 @@ elif menu == "Sales":
                 confirm_delete = st.checkbox(_("Confirm Delete"), key="confirm_service_sale_delete")
                 delete_record = st.form_submit_button(_("Delete Record"))
             if delete_record and confirm_delete:
-                delete_service_sale_record(selected_delete_service_id)
-                st.session_state.pop("service_sale_delete_id", None)
-                st.success(_("Record deleted."))
-                st.rerun()
+                try:
+                    delete_service_sale_record(selected_delete_service_id)
+                    st.session_state.pop("service_sale_delete_id", None)
+                    st.success(_("Record deleted."))
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(_(str(exc)))
 
 # Expenses
 elif menu == "Expenses":
@@ -972,10 +1023,13 @@ elif menu == "Expenses":
                 if not edit_expense_name.strip() or edit_amount <= 0:
                     st.error(_("Expense name and amount are required."))
                 else:
-                    update_expense_record(selected_expense_id, edit_expense_date, edit_expense_name.strip(), edit_amount, edit_remarks)
-                    st.session_state.pop("expense_edit_id", None)
-                    st.success(_("Record updated."))
-                    st.rerun()
+                    try:
+                        update_expense_record(selected_expense_id, edit_expense_date, edit_expense_name.strip(), edit_amount, edit_remarks)
+                        st.session_state.pop("expense_edit_id", None)
+                        st.success(_("Record updated."))
+                        st.rerun()
+                    except ValueError as exc:
+                        st.error(_(str(exc)))
 
         selected_delete_expense_id = st.session_state.get("expense_delete_id")
         if selected_delete_expense_id:
@@ -983,10 +1037,13 @@ elif menu == "Expenses":
                 confirm_delete = st.checkbox(_("Confirm Delete"), key="confirm_expense_delete")
                 delete_record = st.form_submit_button(_("Delete Record"))
             if delete_record and confirm_delete:
-                delete_expense_record(selected_delete_expense_id)
-                st.session_state.pop("expense_delete_id", None)
-                st.success(_("Record deleted."))
-                st.rerun()
+                try:
+                    delete_expense_record(selected_delete_expense_id)
+                    st.session_state.pop("expense_delete_id", None)
+                    st.success(_("Record deleted."))
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(_(str(exc)))
 
 # Reports
 elif menu == "Reports":
