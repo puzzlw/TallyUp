@@ -38,7 +38,9 @@ Add your Supabase Postgres connection string and login passwords:
 
 ```toml
 DATABASE_URL = "postgresql://..."
+STAFF_USERNAME = "staff"
 STAFF_PASSWORD = "staff-password"
+ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "admin-password"
 ```
 

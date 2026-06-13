@@ -469,9 +469,13 @@ TRANSLATIONS = {
     "This change would make stock negative.": "Mabadiliko haya yatafanya stock iwe hasi.",
     "Login": "Ingia",
     "Logout": "Toka",
+    "Sign in": "Ingia",
+    "Sign in to your account": "Ingia kwenye akaunti yako",
+    "Username": "Jina la mtumiaji",
+    "Enter username": "Weka jina la mtumiaji",
     "Password": "Nenosiri",
     "Enter password": "Weka nenosiri",
-    "Invalid password.": "Nenosiri si sahihi.",
+    "Invalid username or password.": "Jina la mtumiaji au nenosiri si sahihi.",
     "Signed in as": "Umeingia kama",
     "Staff": "Mfanyakazi",
     "Admin": "Admin",
@@ -517,16 +521,96 @@ def localize_df(df):
     return df.rename(columns={col: format_column_heading(col) for col in df.columns})
 
 
-def login_user(password):
+def get_login_username(role):
+    return get_secret_value(f"{role.upper()}_USERNAME") or role
+
+
+def login_user(username, password):
+    clean_username = username.strip().lower()
+    admin_username = get_login_username("admin").strip().lower()
+    staff_username = get_login_username("staff").strip().lower()
     admin_password = get_secret_value("ADMIN_PASSWORD")
     staff_password = get_secret_value("STAFF_PASSWORD")
-    if admin_password and password == admin_password:
+    if admin_password and clean_username == admin_username and password == admin_password:
         st.session_state.role = "admin"
+        st.session_state.username = username.strip()
         return True
-    if staff_password and password == staff_password:
+    if staff_password and clean_username == staff_username and password == staff_password:
         st.session_state.role = "staff"
+        st.session_state.username = username.strip()
         return True
     return False
+
+
+def render_login_styles():
+    st.markdown(
+        """
+        <style>
+        [data-testid="stSidebar"] {
+            display: none;
+        }
+        [data-testid="stAppViewContainer"] {
+            background: #f8fafc;
+        }
+        .block-container {
+            max-width: 520px;
+            padding-top: 9vh;
+        }
+        div[data-testid="stForm"] {
+            background: #ffffff;
+            border: 1px solid #dbe4ef;
+            border-radius: 16px;
+            padding: 32px;
+            box-shadow: 0 14px 35px rgba(15, 23, 42, 0.08);
+        }
+        div[data-testid="stForm"] button {
+            width: 100%;
+            border-radius: 10px;
+            background: #18a8e0;
+            border-color: #18a8e0;
+            color: white;
+            font-weight: 700;
+        }
+        .login-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 26px;
+        }
+        .login-logo {
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            background: #18a8e0;
+            display: grid;
+            place-items: center;
+            color: white;
+            font-weight: 800;
+        }
+        .login-title {
+            font-size: 18px;
+            font-weight: 800;
+            color: #0f172a;
+            line-height: 1.1;
+        }
+        .login-subtitle {
+            color: #64748b;
+            font-size: 13px;
+        }
+        .login-heading {
+            font-size: 26px;
+            font-weight: 800;
+            color: #0f172a;
+            margin-bottom: 4px;
+        }
+        .login-helper {
+            color: #64748b;
+            margin-bottom: 24px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def require_login():
@@ -536,16 +620,35 @@ def require_login():
     if st.session_state.role:
         return
 
-    st.title(_("TallyUp"))
+    render_login_styles()
     with st.form("login_form"):
+        top_left, top_right = st.columns([2, 1])
+        with top_left:
+            st.markdown(
+                """
+                <div class="login-brand">
+                    <div class="login-logo">T</div>
+                    <div>
+                        <div class="login-title">TallyUp</div>
+                        <div class="login-subtitle">Business Finance</div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with top_right:
+            st.selectbox("Language / Lugha", ["English", "Kiswahili"], key="language", label_visibility="collapsed")
+        st.markdown(f'<div class="login-heading">{_("Sign in")}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="login-helper">{_("Sign in to your account")}</div>', unsafe_allow_html=True)
+        username = st.text_input(_("Username"), placeholder=_("Enter username"))
         password = st.text_input(_("Password"), type="password", placeholder=_("Enter password"))
-        submitted = st.form_submit_button(_("Login"))
+        submitted = st.form_submit_button(_("Sign in"))
 
     if submitted:
-        if login_user(password):
+        if login_user(username, password):
             st.rerun()
         else:
-            st.error(_("Invalid password."))
+            st.error(_("Invalid username or password."))
     st.stop()
 
 
@@ -1229,4 +1332,5 @@ elif menu == "Export Data":
 
 st.sidebar.markdown("---")
 st.sidebar.caption(_("TallyUp") + " v1")
-st.sidebar.selectbox("Language / Lugha", ["English", "Kiswahili"], key="language")
+if st.session_state.role:
+    st.sidebar.selectbox("Language / Lugha", ["English", "Kiswahili"], key="language")
