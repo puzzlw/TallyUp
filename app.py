@@ -553,24 +553,31 @@ def render_login_styles():
             background: #f8fafc;
         }
         .block-container {
-            max-width: 480px;
-            padding-top: 10vh;
+            max-width: 450px;
+            padding-top: 7vh;
         }
         div[data-testid="stForm"] {
             background: #ffffff;
             border: 1px solid #dbe4ef;
             border-top: 0;
-            border-radius: 0 0 16px 16px;
-            padding: 0 34px 34px 34px;
-            box-shadow: 0 14px 35px rgba(15, 23, 42, 0.08);
+            border-radius: 0 0 14px 14px;
+            padding: 0 32px 32px 32px;
+            box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
         }
         .login-card-head {
             background: #ffffff;
             border: 1px solid #dbe4ef;
             border-bottom: 0;
-            border-radius: 16px 16px 0 0;
-            padding: 34px 34px 0 34px;
-            box-shadow: 0 14px 35px rgba(15, 23, 42, 0.08);
+            border-radius: 14px 14px 0 0;
+            padding: 32px 32px 0 32px;
+            box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
+        }
+        .login-card-head [data-testid="column"]:last-child {
+            display: flex;
+            justify-content: flex-end;
+        }
+        .login-card-head [data-testid="stSelectbox"] {
+            max-width: 125px;
         }
         div[data-testid="stFormSubmitButton"] button {
             width: 100%;
@@ -579,6 +586,12 @@ def render_login_styles():
             border-color: #18a8e0;
             color: white;
             font-weight: 700;
+            min-height: 42px;
+        }
+        div[data-testid="stTextInput"] input {
+            min-height: 40px;
+            border-radius: 10px;
+            background: #eaf2ff;
         }
         div[data-testid="stForm"] div[data-baseweb="input"] button {
             width: 1.5rem;
@@ -597,7 +610,7 @@ def render_login_styles():
             display: flex;
             align-items: center;
             gap: 12px;
-            margin-bottom: 24px;
+            margin-bottom: 28px;
         }
         .login-logo {
             width: 40px;
@@ -620,17 +633,17 @@ def render_login_styles():
             font-size: 13px;
         }
         .login-heading {
-            font-size: 26px;
+            font-size: 25px;
             font-weight: 800;
             color: #0f172a;
-            margin-bottom: 4px;
+            margin-bottom: 6px;
         }
         .login-helper {
             color: #64748b;
-            margin-bottom: 4px;
+            margin-bottom: 24px;
         }
         div[data-testid="stForm"] > div:first-child {
-            gap: 0.75rem;
+            gap: 1rem;
         }
         </style>
         """,
