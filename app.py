@@ -405,6 +405,9 @@ TRANSLATIONS = {
     "Download your business records as Excel files.": "Pakua rekodi za biashara yako kama faili la Excel.",
     "Download Excel Export": "Pakua Excel",
     "Edit / Delete": "Hariri / Futa",
+    "Edit": "Hariri",
+    "Delete": "Futa",
+    "Actions": "Vitendo",
     "Select Record": "Chagua Rekodi",
     "Save Changes": "Hifadhi Mabadiliko",
     "Delete Record": "Futa Rekodi",
@@ -453,6 +456,36 @@ def format_column_heading(column):
 
 def localize_df(df):
     return df.rename(columns={col: format_column_heading(col) for col in df.columns})
+
+
+def render_action_rows(df, id_column, display_columns, key_prefix):
+    header_columns = st.columns([1.2] * len(display_columns) + [0.7])
+    for column, (label, _, _) in zip(header_columns, display_columns):
+        column.caption(_(label).upper())
+    header_columns[-1].caption(_("Actions").upper())
+
+    valid_ids = set()
+    for row in df.to_dict("records"):
+        record_id = int(row[id_column])
+        valid_ids.add(record_id)
+        row_columns = st.columns([1.2] * len(display_columns) + [0.7])
+        for column, (_, field, formatter) in zip(row_columns, display_columns):
+            value = row[field]
+            column.write(formatter(value) if formatter else value)
+
+        edit_column, delete_column = row_columns[-1].columns(2)
+        if edit_column.button("✎", key=f"{key_prefix}_edit_{record_id}", help=_("Edit")):
+            st.session_state[f"{key_prefix}_edit_id"] = record_id
+            st.session_state.pop(f"{key_prefix}_delete_id", None)
+            st.rerun()
+        if delete_column.button("🗑", key=f"{key_prefix}_delete_{record_id}", help=_("Delete")):
+            st.session_state[f"{key_prefix}_delete_id"] = record_id
+            st.session_state.pop(f"{key_prefix}_edit_id", None)
+            st.rerun()
+
+    for state_key in (f"{key_prefix}_edit_id", f"{key_prefix}_delete_id"):
+        if st.session_state.get(state_key) not in valid_ids:
+            st.session_state.pop(state_key, None)
 
 
 def pin_language_selector_to_sidebar_bottom():
@@ -632,44 +665,57 @@ elif menu == "Inventory/Stock":
         if editable_purchases.empty:
             st.info(_("No records available."))
         else:
-            purchase_options = {
-                f"{row.purchase_date} - {row.item_name} - {money(row.total_cost)}": int(row.purchase_id)
-                for row in editable_purchases.itertuples()
-            }
-            selected_purchase_label = st.selectbox(_("Select Record"), list(purchase_options.keys()), key="purchase_edit_select")
-            selected_purchase_id = purchase_options[selected_purchase_label]
-            purchase_row = editable_purchases[editable_purchases["purchase_id"] == selected_purchase_id].iloc[0]
-            with st.form("purchase_edit_form"):
-                c1, c2 = st.columns(2)
-                edit_purchase_date = c1.date_input(_("Date"), value=as_date(purchase_row["purchase_date"]), key="edit_purchase_date")
-                edit_item_name = c2.text_input(_("Item Name"), value=purchase_row["item_name"], key="edit_purchase_item")
-                c3, c4, c5 = st.columns(3)
-                edit_buying_price = c3.number_input(_("Buying Price"), min_value=0.0, value=float(purchase_row["buying_price"]), step=100.0, key="edit_purchase_buy")
-                edit_quantity = c4.number_input(_("Quantity"), min_value=0.0, value=float(purchase_row["quantity"]), step=1.0, key="edit_purchase_qty")
-                c5.metric(_("Total Cost"), money(edit_buying_price * edit_quantity))
-                save_changes = st.form_submit_button(_("Save Changes"))
-            if save_changes:
-                try:
-                    if not edit_item_name.strip() or edit_buying_price <= 0 or edit_quantity <= 0:
-                        st.error(_("Buying price and quantity must be greater than zero."))
-                    else:
-                        update_purchase_record(selected_purchase_id, edit_purchase_date, edit_item_name.strip(), edit_buying_price, edit_quantity)
-                        st.success(_("Record updated."))
-                        st.rerun()
-                except ValueError as exc:
-                    st.error(_(str(exc)))
+            render_action_rows(
+                editable_purchases,
+                "purchase_id",
+                [
+                    ("Date", "purchase_date", None),
+                    ("Item Name", "item_name", None),
+                    ("Buying Price", "buying_price", money),
+                    ("Quantity", "quantity", None),
+                    ("Total Cost", "total_cost", money),
+                ],
+                "purchase",
+            )
 
-            with st.form("purchase_delete_form"):
-                confirm_delete = st.checkbox(_("Confirm Delete"), key="confirm_purchase_delete")
-                delete_record = st.form_submit_button(_("Delete Record"))
-            if delete_record:
-                try:
-                    if confirm_delete:
-                        delete_purchase_record(selected_purchase_id)
-                        st.success(_("Record deleted."))
-                        st.rerun()
-                except ValueError as exc:
-                    st.error(_(str(exc)))
+            selected_purchase_id = st.session_state.get("purchase_edit_id")
+            if selected_purchase_id:
+                purchase_row = editable_purchases[editable_purchases["purchase_id"] == selected_purchase_id].iloc[0]
+                with st.form("purchase_edit_form"):
+                    c1, c2 = st.columns(2)
+                    edit_purchase_date = c1.date_input(_("Date"), value=as_date(purchase_row["purchase_date"]), key="edit_purchase_date")
+                    edit_item_name = c2.text_input(_("Item Name"), value=purchase_row["item_name"], key="edit_purchase_item")
+                    c3, c4, c5 = st.columns(3)
+                    edit_buying_price = c3.number_input(_("Buying Price"), min_value=0.0, value=float(purchase_row["buying_price"]), step=100.0, key="edit_purchase_buy")
+                    edit_quantity = c4.number_input(_("Quantity"), min_value=0.0, value=float(purchase_row["quantity"]), step=1.0, key="edit_purchase_qty")
+                    c5.metric(_("Total Cost"), money(edit_buying_price * edit_quantity))
+                    save_changes = st.form_submit_button(_("Save Changes"))
+                if save_changes:
+                    try:
+                        if not edit_item_name.strip() or edit_buying_price <= 0 or edit_quantity <= 0:
+                            st.error(_("Buying price and quantity must be greater than zero."))
+                        else:
+                            update_purchase_record(selected_purchase_id, edit_purchase_date, edit_item_name.strip(), edit_buying_price, edit_quantity)
+                            st.session_state.pop("purchase_edit_id", None)
+                            st.success(_("Record updated."))
+                            st.rerun()
+                    except ValueError as exc:
+                        st.error(_(str(exc)))
+
+            selected_delete_purchase_id = st.session_state.get("purchase_delete_id")
+            if selected_delete_purchase_id:
+                with st.form("purchase_delete_form"):
+                    confirm_delete = st.checkbox(_("Confirm Delete"), key="confirm_purchase_delete")
+                    delete_record = st.form_submit_button(_("Delete Record"))
+                if delete_record:
+                    try:
+                        if confirm_delete:
+                            delete_purchase_record(selected_delete_purchase_id)
+                            st.session_state.pop("purchase_delete_id", None)
+                            st.success(_("Record deleted."))
+                            st.rerun()
+                    except ValueError as exc:
+                        st.error(_(str(exc)))
 
 # Sales
 elif menu == "Sales":
@@ -793,45 +839,58 @@ elif menu == "Sales":
             if editable_sales.empty:
                 st.info(_("No records available."))
             else:
-                sale_options = {
-                    f"{row.sale_date} - {row.item_name} - {money(row.total_amount)}": int(row.sale_id)
-                    for row in editable_sales.itertuples()
-                }
-                selected_sale_label = st.selectbox(_("Select Record"), list(sale_options.keys()), key="goods_sale_edit_select")
-                selected_sale_id = sale_options[selected_sale_label]
-                sale_row = editable_sales[editable_sales["sale_id"] == selected_sale_id].iloc[0]
-                mapping, options = get_item_options()
-                item_index = options.index(sale_row["item_name"]) if sale_row["item_name"] in options else 0
-                with st.form("goods_sale_edit_form"):
-                    edit_sale_date = st.date_input(_("Date"), value=as_date(sale_row["sale_date"]), key="edit_goods_sale_date")
-                    edit_item_label = st.selectbox(_("Name"), options, index=item_index, key="edit_goods_sale_item")
-                    c1, c2, c3 = st.columns(3)
-                    edit_selling_price = c1.number_input(_("Selling Price"), min_value=0.0, value=float(sale_row["selling_price"]), step=100.0, key="edit_goods_sale_price")
-                    edit_quantity = c2.number_input(_("Quantity"), min_value=0.0, value=float(sale_row["quantity"]), step=1.0, key="edit_goods_sale_qty")
-                    c3.metric(_("Total"), money(edit_selling_price * edit_quantity))
-                    save_changes = st.form_submit_button(_("Save Changes"))
-                if save_changes:
-                    try:
-                        if edit_selling_price <= 0 or edit_quantity <= 0:
-                            st.error(_("Selling price and quantity must be greater than zero."))
-                        else:
-                            update_goods_sale_record(selected_sale_id, edit_sale_date, mapping[edit_item_label], edit_selling_price, edit_quantity)
-                            st.success(_("Record updated."))
-                            st.rerun()
-                    except ValueError as exc:
-                        st.error(_(str(exc)))
+                render_action_rows(
+                    editable_sales,
+                    "sale_id",
+                    [
+                        ("Date", "sale_date", None),
+                        ("Name", "item_name", None),
+                        ("Selling Price", "selling_price", money),
+                        ("Quantity", "quantity", None),
+                        ("Total", "total_amount", money),
+                    ],
+                    "goods_sale",
+                )
 
-                with st.form("goods_sale_delete_form"):
-                    confirm_delete = st.checkbox(_("Confirm Delete"), key="confirm_goods_sale_delete")
-                    delete_record = st.form_submit_button(_("Delete Record"))
-                if delete_record:
-                    try:
-                        if confirm_delete:
-                            delete_goods_sale_record(selected_sale_id)
-                            st.success(_("Record deleted."))
-                            st.rerun()
-                    except ValueError as exc:
-                        st.error(_(str(exc)))
+                selected_sale_id = st.session_state.get("goods_sale_edit_id")
+                if selected_sale_id:
+                    sale_row = editable_sales[editable_sales["sale_id"] == selected_sale_id].iloc[0]
+                    mapping, options = get_item_options()
+                    item_index = options.index(sale_row["item_name"]) if sale_row["item_name"] in options else 0
+                    with st.form("goods_sale_edit_form"):
+                        edit_sale_date = st.date_input(_("Date"), value=as_date(sale_row["sale_date"]), key="edit_goods_sale_date")
+                        edit_item_label = st.selectbox(_("Name"), options, index=item_index, key="edit_goods_sale_item")
+                        c1, c2, c3 = st.columns(3)
+                        edit_selling_price = c1.number_input(_("Selling Price"), min_value=0.0, value=float(sale_row["selling_price"]), step=100.0, key="edit_goods_sale_price")
+                        edit_quantity = c2.number_input(_("Quantity"), min_value=0.0, value=float(sale_row["quantity"]), step=1.0, key="edit_goods_sale_qty")
+                        c3.metric(_("Total"), money(edit_selling_price * edit_quantity))
+                        save_changes = st.form_submit_button(_("Save Changes"))
+                    if save_changes:
+                        try:
+                            if edit_selling_price <= 0 or edit_quantity <= 0:
+                                st.error(_("Selling price and quantity must be greater than zero."))
+                            else:
+                                update_goods_sale_record(selected_sale_id, edit_sale_date, mapping[edit_item_label], edit_selling_price, edit_quantity)
+                                st.session_state.pop("goods_sale_edit_id", None)
+                                st.success(_("Record updated."))
+                                st.rerun()
+                        except ValueError as exc:
+                            st.error(_(str(exc)))
+
+                selected_delete_sale_id = st.session_state.get("goods_sale_delete_id")
+                if selected_delete_sale_id:
+                    with st.form("goods_sale_delete_form"):
+                        confirm_delete = st.checkbox(_("Confirm Delete"), key="confirm_goods_sale_delete")
+                        delete_record = st.form_submit_button(_("Delete Record"))
+                    if delete_record:
+                        try:
+                            if confirm_delete:
+                                delete_goods_sale_record(selected_delete_sale_id)
+                                st.session_state.pop("goods_sale_delete_id", None)
+                                st.success(_("Record deleted."))
+                                st.rerun()
+                        except ValueError as exc:
+                            st.error(_(str(exc)))
         else:
             editable_service_sales = query_df("""
                 SELECT service_sale_id, sale_date, service_name, selling_price,
@@ -842,39 +901,52 @@ elif menu == "Sales":
             if editable_service_sales.empty:
                 st.info(_("No records available."))
             else:
-                service_options = {
-                    f"{row.sale_date} - {row.service_name} - {money(row.total_amount)}": int(row.service_sale_id)
-                    for row in editable_service_sales.itertuples()
-                }
-                selected_service_label = st.selectbox(_("Select Record"), list(service_options.keys()), key="service_sale_edit_select")
-                selected_service_id = service_options[selected_service_label]
-                service_row = editable_service_sales[editable_service_sales["service_sale_id"] == selected_service_id].iloc[0]
-                with st.form("service_sale_edit_form"):
-                    c1, c2 = st.columns(2)
-                    edit_service_date = c1.date_input(_("Date"), value=as_date(service_row["sale_date"]), key="edit_service_sale_date")
-                    edit_service_name = c2.text_input(_("Name"), value=service_row["service_name"], key="edit_service_sale_name")
-                    c3, c4, c5 = st.columns(3)
-                    edit_service_price = c3.number_input(_("Selling Price"), min_value=0.0, value=float(service_row["selling_price"]), step=100.0, key="edit_service_sale_price")
-                    edit_service_quantity = c4.number_input(_("Quantity"), min_value=0.0, value=float(service_row["quantity"]), step=1.0, key="edit_service_sale_qty")
-                    c5.metric(_("Total"), money(edit_service_price * edit_service_quantity))
-                    save_changes = st.form_submit_button(_("Save Changes"))
-                if save_changes:
-                    if not edit_service_name.strip():
-                        st.error(_("Name is required."))
-                    elif edit_service_price <= 0 or edit_service_quantity <= 0:
-                        st.error(_("Selling price and quantity must be greater than zero."))
-                    else:
-                        update_service_sale_record(selected_service_id, edit_service_date, edit_service_name.strip(), edit_service_price, edit_service_quantity)
-                        st.success(_("Record updated."))
-                        st.rerun()
+                render_action_rows(
+                    editable_service_sales,
+                    "service_sale_id",
+                    [
+                        ("Date", "sale_date", None),
+                        ("Name", "service_name", None),
+                        ("Selling Price", "selling_price", money),
+                        ("Quantity", "quantity", None),
+                        ("Total", "total_amount", money),
+                    ],
+                    "service_sale",
+                )
 
-                with st.form("service_sale_delete_form"):
-                    confirm_delete = st.checkbox(_("Confirm Delete"), key="confirm_service_sale_delete")
-                    delete_record = st.form_submit_button(_("Delete Record"))
-                if delete_record and confirm_delete:
-                    delete_service_sale_record(selected_service_id)
-                    st.success(_("Record deleted."))
-                    st.rerun()
+                selected_service_id = st.session_state.get("service_sale_edit_id")
+                if selected_service_id:
+                    service_row = editable_service_sales[editable_service_sales["service_sale_id"] == selected_service_id].iloc[0]
+                    with st.form("service_sale_edit_form"):
+                        c1, c2 = st.columns(2)
+                        edit_service_date = c1.date_input(_("Date"), value=as_date(service_row["sale_date"]), key="edit_service_sale_date")
+                        edit_service_name = c2.text_input(_("Name"), value=service_row["service_name"], key="edit_service_sale_name")
+                        c3, c4, c5 = st.columns(3)
+                        edit_service_price = c3.number_input(_("Selling Price"), min_value=0.0, value=float(service_row["selling_price"]), step=100.0, key="edit_service_sale_price")
+                        edit_service_quantity = c4.number_input(_("Quantity"), min_value=0.0, value=float(service_row["quantity"]), step=1.0, key="edit_service_sale_qty")
+                        c5.metric(_("Total"), money(edit_service_price * edit_service_quantity))
+                        save_changes = st.form_submit_button(_("Save Changes"))
+                    if save_changes:
+                        if not edit_service_name.strip():
+                            st.error(_("Name is required."))
+                        elif edit_service_price <= 0 or edit_service_quantity <= 0:
+                            st.error(_("Selling price and quantity must be greater than zero."))
+                        else:
+                            update_service_sale_record(selected_service_id, edit_service_date, edit_service_name.strip(), edit_service_price, edit_service_quantity)
+                            st.session_state.pop("service_sale_edit_id", None)
+                            st.success(_("Record updated."))
+                            st.rerun()
+
+                selected_delete_service_id = st.session_state.get("service_sale_delete_id")
+                if selected_delete_service_id:
+                    with st.form("service_sale_delete_form"):
+                        confirm_delete = st.checkbox(_("Confirm Delete"), key="confirm_service_sale_delete")
+                        delete_record = st.form_submit_button(_("Delete Record"))
+                    if delete_record and confirm_delete:
+                        delete_service_sale_record(selected_delete_service_id)
+                        st.session_state.pop("service_sale_delete_id", None)
+                        st.success(_("Record deleted."))
+                        st.rerun()
 
 # Expenses
 elif menu == "Expenses":
@@ -909,35 +981,47 @@ elif menu == "Expenses":
         if editable_expenses.empty:
             st.info(_("No records available."))
         else:
-            expense_options = {
-                f"{row.expense_date} - {row.expense_name} - {money(row.amount)}": int(row.expense_id)
-                for row in editable_expenses.itertuples()
-            }
-            selected_expense_label = st.selectbox(_("Select Record"), list(expense_options.keys()), key="expense_edit_select")
-            selected_expense_id = expense_options[selected_expense_label]
-            expense_row = editable_expenses[editable_expenses["expense_id"] == selected_expense_id].iloc[0]
-            with st.form("expense_edit_form"):
-                c1, c2 = st.columns(2)
-                edit_expense_date = c1.date_input(_("Expense Date"), value=as_date(expense_row["expense_date"]), key="edit_expense_date")
-                edit_expense_name = c2.text_input(_("Expense Name"), value=expense_row["expense_name"], key="edit_expense_name")
-                edit_amount = st.number_input(_("Amount"), min_value=0.0, value=float(expense_row["amount"]), step=100.0, key="edit_expense_amount")
-                edit_remarks = st.text_area(_("Remarks"), value=expense_row["remarks"] or "", key="edit_expense_remarks")
-                save_changes = st.form_submit_button(_("Save Changes"))
-            if save_changes:
-                if not edit_expense_name.strip() or edit_amount <= 0:
-                    st.error(_("Expense name and amount are required."))
-                else:
-                    update_expense_record(selected_expense_id, edit_expense_date, edit_expense_name.strip(), edit_amount, edit_remarks)
-                    st.success(_("Record updated."))
-                    st.rerun()
+            render_action_rows(
+                editable_expenses,
+                "expense_id",
+                [
+                    ("Expense Date", "expense_date", None),
+                    ("Expense Name", "expense_name", None),
+                    ("Amount", "amount", money),
+                    ("Remarks", "remarks", None),
+                ],
+                "expense",
+            )
 
-            with st.form("expense_delete_form"):
-                confirm_delete = st.checkbox(_("Confirm Delete"), key="confirm_expense_delete")
-                delete_record = st.form_submit_button(_("Delete Record"))
-            if delete_record and confirm_delete:
-                delete_expense_record(selected_expense_id)
-                st.success(_("Record deleted."))
-                st.rerun()
+            selected_expense_id = st.session_state.get("expense_edit_id")
+            if selected_expense_id:
+                expense_row = editable_expenses[editable_expenses["expense_id"] == selected_expense_id].iloc[0]
+                with st.form("expense_edit_form"):
+                    c1, c2 = st.columns(2)
+                    edit_expense_date = c1.date_input(_("Expense Date"), value=as_date(expense_row["expense_date"]), key="edit_expense_date")
+                    edit_expense_name = c2.text_input(_("Expense Name"), value=expense_row["expense_name"], key="edit_expense_name")
+                    edit_amount = st.number_input(_("Amount"), min_value=0.0, value=float(expense_row["amount"]), step=100.0, key="edit_expense_amount")
+                    edit_remarks = st.text_area(_("Remarks"), value=expense_row["remarks"] or "", key="edit_expense_remarks")
+                    save_changes = st.form_submit_button(_("Save Changes"))
+                if save_changes:
+                    if not edit_expense_name.strip() or edit_amount <= 0:
+                        st.error(_("Expense name and amount are required."))
+                    else:
+                        update_expense_record(selected_expense_id, edit_expense_date, edit_expense_name.strip(), edit_amount, edit_remarks)
+                        st.session_state.pop("expense_edit_id", None)
+                        st.success(_("Record updated."))
+                        st.rerun()
+
+            selected_delete_expense_id = st.session_state.get("expense_delete_id")
+            if selected_delete_expense_id:
+                with st.form("expense_delete_form"):
+                    confirm_delete = st.checkbox(_("Confirm Delete"), key="confirm_expense_delete")
+                    delete_record = st.form_submit_button(_("Delete Record"))
+                if delete_record and confirm_delete:
+                    delete_expense_record(selected_delete_expense_id)
+                    st.session_state.pop("expense_delete_id", None)
+                    st.success(_("Record deleted."))
+                    st.rerun()
 
 # Reports
 elif menu == "Reports":
