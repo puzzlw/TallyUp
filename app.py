@@ -5,12 +5,13 @@ from io import BytesIO
 import pandas as pd
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from psycopg2.pool import SimpleConnectionPool
 import streamlit as st
 
 st.set_page_config(page_title="TallyUp", page_icon="✏️", layout="wide")
 
 
-def get_conn():
+def get_database_url():
     database_url = os.environ.get("DATABASE_URL", "")
     if not database_url:
         try:
@@ -20,7 +21,20 @@ def get_conn():
     if not database_url:
         st.error("DATABASE_URL is missing from environment variables or .streamlit/secrets.toml.")
         st.stop()
-    return psycopg2.connect(database_url, sslmode="require")
+    return database_url
+
+
+@st.cache_resource(show_spinner=False)
+def get_pool():
+    return SimpleConnectionPool(1, 5, get_database_url(), sslmode="require")
+
+
+def get_conn():
+    return get_pool().getconn()
+
+
+def release_conn(conn):
+    get_pool().putconn(conn)
 
 
 @st.cache_resource(show_spinner=False)
@@ -105,32 +119,39 @@ def init_db():
     cur.execute("DROP TABLE IF EXISTS stock_adjustments")
 
     conn.commit()
-    conn.close()
+    cur.close()
+    release_conn(conn)
 
 
 @st.cache_data(ttl=30, show_spinner=False)
 def query_df(sql, params=()):
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
-    cur.execute(sql, params)
-    rows = cur.fetchall()
-    columns = [desc.name for desc in cur.description] if cur.description else []
-    df = pd.DataFrame(rows, columns=columns)
-    cur.close()
-    conn.close()
-    return df
+    try:
+        cur.execute(sql, params)
+        rows = cur.fetchall()
+        columns = [desc.name for desc in cur.description] if cur.description else []
+        return pd.DataFrame(rows, columns=columns)
+    finally:
+        cur.close()
+        release_conn(conn)
 
 
 def execute(sql, params=()):
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute(sql, params)
-    conn.commit()
-    last_id = cur.fetchone()[0] if cur.description else None
-    cur.close()
-    conn.close()
-    st.cache_data.clear()
-    return last_id
+    try:
+        cur.execute(sql, params)
+        conn.commit()
+        last_id = cur.fetchone()[0] if cur.description else None
+        st.cache_data.clear()
+        return last_id
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        release_conn(conn)
 
 
 def get_items_df():
@@ -375,34 +396,40 @@ elif menu == "Inventory/Stock":
         else:
             conn = get_conn()
             cur = conn.cursor()
-            cur.execute("SELECT item_id FROM items WHERE item_name = %s", (clean_name,))
-            existing = cur.fetchone()
-            if existing:
-                item_id = existing[0]
-                cur.execute(
-                    "UPDATE items SET current_stock = current_stock + %s, buying_price=%s WHERE item_id=%s",
-                    (quantity, buying_price, item_id),
-                )
-            else:
+            try:
+                cur.execute("SELECT item_id FROM items WHERE item_name = %s", (clean_name,))
+                existing = cur.fetchone()
+                if existing:
+                    item_id = existing[0]
+                    cur.execute(
+                        "UPDATE items SET current_stock = current_stock + %s, buying_price=%s WHERE item_id=%s",
+                        (quantity, buying_price, item_id),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        INSERT INTO items (item_name, buying_price, current_stock)
+                        VALUES (%s, %s, %s)
+                        RETURNING item_id
+                        """,
+                        (clean_name, buying_price, quantity),
+                    )
+                    item_id = cur.fetchone()[0]
+
                 cur.execute(
                     """
-                    INSERT INTO items (item_name, buying_price, current_stock)
-                    VALUES (%s, %s, %s)
-                    RETURNING item_id
+                    INSERT INTO purchases (purchase_date, item_id, quantity, buying_price, total_cost)
+                    VALUES (%s, %s, %s, %s, %s)
                     """,
-                    (clean_name, buying_price, quantity),
+                    (str(purchase_date), item_id, quantity, buying_price, total_cost),
                 )
-                item_id = cur.fetchone()[0]
-
-            cur.execute(
-                """
-                INSERT INTO purchases (purchase_date, item_id, quantity, buying_price, total_cost)
-                VALUES (%s, %s, %s, %s, %s)
-                """,
-                (str(purchase_date), item_id, quantity, buying_price, total_cost),
-            )
-            conn.commit()
-            conn.close()
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                cur.close()
+                release_conn(conn)
             st.cache_data.clear()
             st.success(_("Stock saved."))
             st.rerun()
@@ -462,19 +489,25 @@ elif menu == "Sales":
                     estimated_profit = (selling_price - buying_price_at_sale) * quantity
                     conn = get_conn()
                     cur = conn.cursor()
-                    cur.execute(
-                        """
-                        INSERT INTO sales (sale_date, item_id, quantity, selling_price, total_amount, estimated_profit)
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                        """,
-                        (str(sale_date), item_id, quantity, selling_price, total_amount, estimated_profit),
-                    )
-                    cur.execute(
-                        "UPDATE items SET current_stock = current_stock - %s, selling_price=%s WHERE item_id=%s",
-                        (quantity, selling_price, item_id),
-                    )
-                    conn.commit()
-                    conn.close()
+                    try:
+                        cur.execute(
+                            """
+                            INSERT INTO sales (sale_date, item_id, quantity, selling_price, total_amount, estimated_profit)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                            """,
+                            (str(sale_date), item_id, quantity, selling_price, total_amount, estimated_profit),
+                        )
+                        cur.execute(
+                            "UPDATE items SET current_stock = current_stock - %s, selling_price=%s WHERE item_id=%s",
+                            (quantity, selling_price, item_id),
+                        )
+                        conn.commit()
+                    except Exception:
+                        conn.rollback()
+                        raise
+                    finally:
+                        cur.close()
+                        release_conn(conn)
                     st.cache_data.clear()
                     st.success(_("Sale saved and stock updated."))
                     st.rerun()
