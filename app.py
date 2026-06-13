@@ -1,6 +1,8 @@
 import os
 from datetime import date, datetime
+from html import escape
 from io import BytesIO
+from urllib.parse import urlencode
 
 import pandas as pd
 import psycopg2
@@ -1083,29 +1085,124 @@ def render_action_rows_legacy(df, id_column, display_columns, key_prefix):
 
 
 def render_action_rows(df, id_column, display_columns, key_prefix):
-    valid_ids = set()
+    valid_ids = {int(record_id) for record_id in df[id_column].tolist()}
+    query_action = st.query_params.get("row_action")
+    query_key = st.query_params.get("row_key")
+    query_record_id = st.query_params.get("record_id")
+
+    if query_key == key_prefix and query_action in {"edit", "delete"} and query_record_id:
+        try:
+            record_id = int(query_record_id)
+        except ValueError:
+            record_id = None
+        if record_id in valid_ids:
+            st.session_state[f"{key_prefix}_{query_action}_id"] = record_id
+            other_action = "delete" if query_action == "edit" else "edit"
+            st.session_state.pop(f"{key_prefix}_{other_action}_id", None)
+            st.query_params.clear()
+            st.rerun()
+
+    st.markdown(
+        """
+        <style>
+        .history-table-wrap {
+            width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            border-radius: 8px;
+            background: var(--secondary-background-color);
+            margin-bottom: 0.75rem;
+        }
+        .history-table {
+            width: 100%;
+            min-width: 760px;
+            border-collapse: collapse;
+        }
+        .history-table th {
+            color: rgba(148, 163, 184, 0.95);
+            font-size: 0.68rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            text-align: left;
+            padding: 0.65rem 0.75rem;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.24);
+        }
+        .history-table td {
+            color: var(--text-color);
+            font-size: 0.92rem;
+            font-weight: 600;
+            line-height: 1.25;
+            padding: 0.7rem 0.75rem;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+            overflow-wrap: anywhere;
+            vertical-align: middle;
+        }
+        .history-table tr:last-child td {
+            border-bottom: 0;
+        }
+        .history-actions {
+            white-space: nowrap;
+        }
+        .history-action {
+            display: inline-block;
+            color: #18a8e0;
+            font-size: 0.84rem;
+            font-weight: 700;
+            text-decoration: none;
+            margin-right: 0.65rem;
+        }
+        .history-action:hover {
+            text-decoration: underline;
+        }
+        @media (max-width: 640px) {
+            .history-table {
+                min-width: 680px;
+            }
+            .history-table th,
+            .history-table td {
+                padding: 0.6rem 0.65rem;
+                font-size: 0.82rem;
+            }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    headers = "".join(f"<th>{escape(_(label))}</th>" for label, field, formatter in display_columns)
+    headers += f"<th>{escape(_('Actions'))}</th>"
+    rows = []
     for row in df.to_dict("records"):
         record_id = int(row[id_column])
-        valid_ids.add(record_id)
-        with st.container(border=True):
-            for start in range(0, len(display_columns), 3):
-                row_columns = st.columns(min(3, len(display_columns) - start))
-                for column, (label, field, formatter) in zip(row_columns, display_columns[start:start + 3]):
-                    value = row[field]
-                    column.caption(_(label).upper())
-                    column.write(formatter(value) if formatter else value)
+        cells = []
+        for label, field, formatter in display_columns:
+            value = row[field]
+            display_value = formatter(value) if formatter else value
+            cells.append(f"<td>{escape(str(display_value))}</td>")
 
-            if is_editable_record(row):
-                st.caption(_("Actions").upper())
-                edit_column, delete_column, spacer_column = st.columns([1, 1, 8])
-                if edit_column.button("Edit", key=f"{key_prefix}_edit_{record_id}", help=_("Edit")):
-                    st.session_state[f"{key_prefix}_edit_id"] = record_id
-                    st.session_state.pop(f"{key_prefix}_delete_id", None)
-                    st.rerun()
-                if delete_column.button("Delete", key=f"{key_prefix}_delete_{record_id}", help=_("Delete")):
-                    st.session_state[f"{key_prefix}_delete_id"] = record_id
-                    st.session_state.pop(f"{key_prefix}_edit_id", None)
-                    st.rerun()
+        actions = ""
+        if is_editable_record(row):
+            edit_query = urlencode({"row_action": "edit", "row_key": key_prefix, "record_id": record_id})
+            delete_query = urlencode({"row_action": "delete", "row_key": key_prefix, "record_id": record_id})
+            actions = (
+                f'<a class="history-action" href="?{edit_query}">{escape(_("Edit"))}</a>'
+                f'<a class="history-action" href="?{delete_query}">{escape(_("Delete"))}</a>'
+            )
+        cells.append(f'<td class="history-actions">{actions}</td>')
+        rows.append(f"<tr>{''.join(cells)}</tr>")
+
+    st.markdown(
+        f"""
+        <div class="history-table-wrap">
+            <table class="history-table">
+                <thead><tr>{headers}</tr></thead>
+                <tbody>{''.join(rows)}</tbody>
+            </table>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     for state_key in (f"{key_prefix}_edit_id", f"{key_prefix}_delete_id"):
         if st.session_state.get(state_key) not in valid_ids:
