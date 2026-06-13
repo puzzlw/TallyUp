@@ -24,6 +24,16 @@ def get_database_url():
     return database_url
 
 
+def get_secret_value(name):
+    value = os.environ.get(name, "")
+    if value:
+        return value
+    try:
+        return st.secrets.get(name, "")
+    except Exception:
+        return ""
+
+
 @st.cache_resource(show_spinner=False)
 def get_pool():
     return SimpleConnectionPool(1, 5, get_database_url(), sslmode="require")
@@ -457,6 +467,14 @@ TRANSLATIONS = {
     "Confirm Delete": "Thibitisha Kufuta",
     "This record can only be edited or deleted within 24 hours.": "Rekodi hii inaweza kuhaririwa au kufutwa ndani ya saa 24 pekee.",
     "This change would make stock negative.": "Mabadiliko haya yatafanya stock iwe hasi.",
+    "Login": "Ingia",
+    "Logout": "Toka",
+    "Password": "Nenosiri",
+    "Enter password": "Weka nenosiri",
+    "Invalid password.": "Nenosiri si sahihi.",
+    "Signed in as": "Umeingia kama",
+    "Staff": "Mfanyakazi",
+    "Admin": "Admin",
     "date": "tarehe",
     "name": "jina",
     "quantity": "idadi",
@@ -497,6 +515,38 @@ def format_column_heading(column):
 
 def localize_df(df):
     return df.rename(columns={col: format_column_heading(col) for col in df.columns})
+
+
+def login_user(password):
+    admin_password = get_secret_value("ADMIN_PASSWORD")
+    staff_password = get_secret_value("STAFF_PASSWORD")
+    if admin_password and password == admin_password:
+        st.session_state.role = "admin"
+        return True
+    if staff_password and password == staff_password:
+        st.session_state.role = "staff"
+        return True
+    return False
+
+
+def require_login():
+    if "role" not in st.session_state:
+        st.session_state.role = None
+
+    if st.session_state.role:
+        return
+
+    st.title(_("TallyUp"))
+    with st.form("login_form"):
+        password = st.text_input(_("Password"), type="password", placeholder=_("Enter password"))
+        submitted = st.form_submit_button(_("Login"))
+
+    if submitted:
+        if login_user(password):
+            st.rerun()
+        else:
+            st.error(_("Invalid password."))
+    st.stop()
 
 
 def render_action_rows(df, id_column, display_columns, key_prefix):
@@ -561,10 +611,14 @@ if "language" not in st.session_state:
     st.session_state.language = "English"
 _ = translate
 pin_language_selector_to_sidebar_bottom()
+require_login()
 
 st.title(_("TallyUp"))
 
-menu_items = ["Dashboard", "Inventory/Stock", "Sales", "Expenses", "Reports", "Export Data"]
+if st.session_state.role == "admin":
+    menu_items = ["Dashboard", "Inventory/Stock", "Sales", "Expenses", "Reports", "Export Data"]
+else:
+    menu_items = ["Inventory/Stock", "Sales"]
 menu_labels = {_(item): item for item in menu_items}
 menu = menu_labels[
     st.sidebar.radio(
@@ -572,6 +626,12 @@ menu = menu_labels[
         list(menu_labels.keys()),
     )
 ]
+
+role_label = _("Admin") if st.session_state.role == "admin" else _("Staff")
+st.sidebar.caption(f"{_('Signed in as')}: {role_label}")
+if st.sidebar.button(_("Logout")):
+    st.session_state.role = None
+    st.rerun()
 
 # Dashboard
 if menu == "Dashboard":

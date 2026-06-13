@@ -34,13 +34,15 @@ Create a Streamlit secrets file:
 .streamlit/secrets.toml
 ```
 
-Add your Supabase Postgres connection string:
+Add your Supabase Postgres connection string and login passwords:
 
 ```toml
 DATABASE_URL = "postgresql://..."
+STAFF_PASSWORD = "staff-password"
+ADMIN_PASSWORD = "admin-password"
 ```
 
-Keep this file private because it contains your database password.
+Keep this file private because it contains passwords. When deploying, add the same three values as environment variables/secrets on your host.
 
 ## First-time setup
 
@@ -48,7 +50,8 @@ Keep this file private because it contains your database password.
 2. Enter the date, item name, buying price, and quantity.
 3. Use **Sales** to record goods sales.
 4. Use **Sales > Service** to record services such as printing, typing, or photocopying.
-5. Use **Dashboard**, **Expenses**, **Reports**, and **Export Data** to monitor the business.
+5. Staff can use **Inventory/Stock** and **Sales**.
+6. Admins can use **Dashboard**, **Expenses**, **Reports**, and **Export Data** to monitor the business.
 
 ## Notes
 
