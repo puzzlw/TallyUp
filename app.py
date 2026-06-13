@@ -23,7 +23,7 @@ def get_conn():
     return psycopg2.connect(database_url, sslmode="require")
 
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def init_db():
     conn = get_conn()
     cur = conn.cursor()
@@ -108,7 +108,7 @@ def init_db():
     conn.close()
 
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=30, show_spinner=False)
 def query_df(sql, params=()):
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
