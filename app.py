@@ -553,23 +553,24 @@ def render_login_styles():
             background: #f8fafc;
         }
         .block-container {
-            max-width: 520px;
-            padding-top: 9vh;
+            max-width: 480px;
+            padding-top: 10vh;
         }
         div[data-testid="stForm"] {
             background: #ffffff;
             border: 1px solid #dbe4ef;
             border-top: 0;
             border-radius: 0 0 16px 16px;
-            padding: 0 32px 32px 32px;
+            padding: 0 34px 34px 34px;
             box-shadow: 0 14px 35px rgba(15, 23, 42, 0.08);
         }
-        div[data-testid="stVerticalBlock"]:has(.login-brand) {
+        .login-card-head {
             background: #ffffff;
             border: 1px solid #dbe4ef;
             border-bottom: 0;
             border-radius: 16px 16px 0 0;
-            padding: 32px 32px 0 32px;
+            padding: 34px 34px 0 34px;
+            box-shadow: 0 14px 35px rgba(15, 23, 42, 0.08);
         }
         div[data-testid="stFormSubmitButton"] button {
             width: 100%;
@@ -596,7 +597,7 @@ def render_login_styles():
             display: flex;
             align-items: center;
             gap: 12px;
-            margin-bottom: 26px;
+            margin-bottom: 24px;
         }
         .login-logo {
             width: 40px;
@@ -628,6 +629,9 @@ def render_login_styles():
             color: #64748b;
             margin-bottom: 4px;
         }
+        div[data-testid="stForm"] > div:first-child {
+            gap: 0.75rem;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -642,8 +646,9 @@ def require_login():
         return
 
     render_login_styles()
-    top_left, top_right = st.columns([4, 4])
-    with top_left:
+    st.markdown('<div class="login-card-head">', unsafe_allow_html=True)
+    brand_col, language_col = st.columns([1, 1])
+    with brand_col:
         st.markdown(
             """
             <div class="login-brand">
@@ -655,8 +660,9 @@ def require_login():
             """,
             unsafe_allow_html=True,
         )
-    with top_right:
+    with language_col:
         st.selectbox("Language / Lugha", ["English", "Kiswahili"], key="language", label_visibility="collapsed")
+    st.markdown("</div>", unsafe_allow_html=True)
 
     with st.form("login_form"):
         st.markdown(f'<div class="login-heading">{_("Sign in")}</div>', unsafe_allow_html=True)
