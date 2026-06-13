@@ -559,9 +559,17 @@ def render_login_styles():
         div[data-testid="stForm"] {
             background: #ffffff;
             border: 1px solid #dbe4ef;
-            border-radius: 16px;
-            padding: 32px;
+            border-top: 0;
+            border-radius: 0 0 16px 16px;
+            padding: 0 32px 32px 32px;
             box-shadow: 0 14px 35px rgba(15, 23, 42, 0.08);
+        }
+        div[data-testid="stVerticalBlock"]:has(.login-brand) {
+            background: #ffffff;
+            border: 1px solid #dbe4ef;
+            border-bottom: 0;
+            border-radius: 16px 16px 0 0;
+            padding: 32px 32px 0 32px;
         }
         div[data-testid="stFormSubmitButton"] button {
             width: 100%;
@@ -634,22 +642,23 @@ def require_login():
         return
 
     render_login_styles()
-    with st.form("login_form"):
-        top_left, top_right = st.columns([4, 4])
-        with top_left:
-            st.markdown(
-                """
-                <div class="login-brand">
-                    <div class="login-logo">T</div>
-                    <div>
-                        <div class="login-title">TallyUp</div>
-                    </div>
+    top_left, top_right = st.columns([4, 4])
+    with top_left:
+        st.markdown(
+            """
+            <div class="login-brand">
+                <div class="login-logo">T</div>
+                <div>
+                    <div class="login-title">TallyUp</div>
                 </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        with top_right:
-            st.selectbox("Language / Lugha", ["English", "Kiswahili"], key="language", label_visibility="collapsed")
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with top_right:
+        st.selectbox("Language / Lugha", ["English", "Kiswahili"], key="language", label_visibility="collapsed")
+
+    with st.form("login_form"):
         st.markdown(f'<div class="login-heading">{_("Sign in")}</div>', unsafe_allow_html=True)
         st.markdown(f'<div class="login-helper">{_("Sign in to your account")}</div>', unsafe_allow_html=True)
         username = st.text_input(_("Username"), placeholder=_("Enter username"))
