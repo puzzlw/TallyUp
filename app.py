@@ -314,7 +314,6 @@ _ = translate
 pin_language_selector_to_sidebar_bottom()
 
 st.title(_("TallyUp"))
-st.caption(_("A simple stock, sales, expense, and profit tracker for a small stationery business."))
 
 menu_items = ["Dashboard", "Inventory/Stock", "Sales", "Expenses", "Reports", "Export Data"]
 menu_labels = {_(item): item for item in menu_items}
