@@ -55,4 +55,4 @@ Keep this file private because it contains your database password.
 - Estimated profit uses the buying price saved on the item at the time of sale.
 - Service sales count the full sale amount as profit.
 - Stock reduces automatically after sales and increases after purchases.
-- Inventory, sales, service sales, and expenses can be edited or deleted for 24 hours after they are added.
+- Inventory, sales, service sales, and expenses can be edited or deleted.
