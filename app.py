@@ -563,13 +563,26 @@ def render_login_styles():
             padding: 32px;
             box-shadow: 0 14px 35px rgba(15, 23, 42, 0.08);
         }
-        div[data-testid="stForm"] button {
+        div[data-testid="stFormSubmitButton"] button {
             width: 100%;
             border-radius: 10px;
             background: #18a8e0;
             border-color: #18a8e0;
             color: white;
             font-weight: 700;
+        }
+        div[data-testid="stForm"] div[data-baseweb="input"] button {
+            width: 1.5rem;
+            height: 1.5rem;
+            min-width: 1.5rem;
+            padding: 0;
+            background: transparent;
+            border: 0;
+            color: #64748b;
+        }
+        div[data-testid="stForm"] div[data-baseweb="input"] button svg {
+            width: 14px;
+            height: 14px;
         }
         .login-brand {
             display: flex;
@@ -605,7 +618,7 @@ def render_login_styles():
         }
         .login-helper {
             color: #64748b;
-            margin-bottom: 24px;
+            margin-bottom: 4px;
         }
         </style>
         """,
@@ -622,7 +635,7 @@ def require_login():
 
     render_login_styles()
     with st.form("login_form"):
-        top_left, top_right = st.columns([2, 1])
+        top_left, top_right = st.columns([4, 4])
         with top_left:
             st.markdown(
                 """
@@ -630,7 +643,6 @@ def require_login():
                     <div class="login-logo">T</div>
                     <div>
                         <div class="login-title">TallyUp</div>
-                        <div class="login-subtitle">Business Finance</div>
                     </div>
                 </div>
                 """,
@@ -730,8 +742,6 @@ menu = menu_labels[
     )
 ]
 
-role_label = _("Admin") if st.session_state.role == "admin" else _("Staff")
-st.sidebar.caption(f"{_('Signed in as')}: {role_label}")
 if st.sidebar.button(_("Logout")):
     st.session_state.role = None
     st.rerun()
