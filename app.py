@@ -11,9 +11,14 @@ st.set_page_config(page_title="TallyUp", page_icon="✏️", layout="wide")
 
 
 def get_conn():
-    database_url = st.secrets.get("DATABASE_URL", "") or os.environ.get("DATABASE_URL", "")
+    database_url = os.environ.get("DATABASE_URL", "")
     if not database_url:
-        st.error("DATABASE_URL is missing from .streamlit/secrets.toml.")
+        try:
+            database_url = st.secrets.get("DATABASE_URL", "")
+        except Exception:
+            database_url = ""
+    if not database_url:
+        st.error("DATABASE_URL is missing from environment variables or .streamlit/secrets.toml.")
         st.stop()
     return psycopg2.connect(database_url, sslmode="require")
 
