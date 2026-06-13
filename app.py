@@ -1,8 +1,6 @@
 import os
 from datetime import date, datetime
-from html import escape
 from io import BytesIO
-from urllib.parse import urlencode
 
 import pandas as pd
 import psycopg2
@@ -1084,7 +1082,7 @@ def render_action_rows_legacy(df, id_column, display_columns, key_prefix):
             st.session_state.pop(state_key, None)
 
 
-def render_action_rows(df, id_column, display_columns, key_prefix):
+def render_action_rows_link_legacy(df, id_column, display_columns, key_prefix):
     valid_ids = {int(record_id) for record_id in df[id_column].tolist()}
     query_action = st.query_params.get("row_action")
     query_key = st.query_params.get("row_key")
@@ -1186,8 +1184,8 @@ def render_action_rows(df, id_column, display_columns, key_prefix):
             edit_query = urlencode({"row_action": "edit", "row_key": key_prefix, "record_id": record_id})
             delete_query = urlencode({"row_action": "delete", "row_key": key_prefix, "record_id": record_id})
             actions = (
-                f'<a class="history-action" href="?{edit_query}">{escape(_("Edit"))}</a>'
-                f'<a class="history-action" href="?{delete_query}">{escape(_("Delete"))}</a>'
+                f'<a class="history-action" href="?{edit_query}" target="_self">{escape(_("Edit"))}</a>'
+                f'<a class="history-action" href="?{delete_query}" target="_self">{escape(_("Delete"))}</a>'
             )
         cells.append(f'<td class="history-actions">{actions}</td>')
         rows.append(f"<tr>{''.join(cells)}</tr>")
@@ -1203,6 +1201,68 @@ def render_action_rows(df, id_column, display_columns, key_prefix):
         """,
         unsafe_allow_html=True,
     )
+
+    for state_key in (f"{key_prefix}_edit_id", f"{key_prefix}_delete_id"):
+        if st.session_state.get(state_key) not in valid_ids:
+            st.session_state.pop(state_key, None)
+
+
+def render_action_rows(df, id_column, display_columns, key_prefix):
+    valid_ids = {int(record_id) for record_id in df[id_column].tolist()}
+    weights = [1.2] * len(display_columns) + [0.8]
+
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stHorizontalBlock"] [data-testid="stCaptionContainer"] {
+            white-space: nowrap;
+        }
+        div[data-testid="stHorizontalBlock"] button {
+            min-height: 2.1rem;
+            padding: 0.25rem 0.45rem;
+        }
+        @media (max-width: 640px) {
+            div[data-testid="stHorizontalBlock"] [data-testid="stMarkdownContainer"] p {
+                font-size: 0.82rem;
+                line-height: 1.2;
+            }
+            div[data-testid="stHorizontalBlock"] [data-testid="stCaptionContainer"] {
+                font-size: 0.62rem;
+            }
+            div[data-testid="stHorizontalBlock"] button {
+                font-size: 0.72rem;
+                padding: 0.2rem 0.32rem;
+            }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    header_columns = st.columns(weights)
+    for column, (label, field_name, formatter) in zip(header_columns, display_columns):
+        column.caption(_(label).upper())
+    header_columns[-1].caption(_("Actions").upper())
+
+    for row in df.to_dict("records"):
+        record_id = int(row[id_column])
+        row_columns = st.columns(weights)
+        for column, (label, field, formatter) in zip(row_columns, display_columns):
+            value = row[field]
+            column.write(formatter(value) if formatter else value)
+
+        if is_editable_record(row):
+            edit_column, delete_column = row_columns[-1].columns(2)
+            if edit_column.button("Edit", key=f"{key_prefix}_edit_{record_id}", help=_("Edit")):
+                st.session_state[f"{key_prefix}_edit_id"] = record_id
+                st.session_state.pop(f"{key_prefix}_delete_id", None)
+                st.rerun()
+            if delete_column.button("Del", key=f"{key_prefix}_delete_{record_id}", help=_("Delete")):
+                st.session_state[f"{key_prefix}_delete_id"] = record_id
+                st.session_state.pop(f"{key_prefix}_edit_id", None)
+                st.rerun()
+        else:
+            row_columns[-1].write("")
 
     for state_key in (f"{key_prefix}_edit_id", f"{key_prefix}_delete_id"):
         if st.session_state.get(state_key) not in valid_ids:
