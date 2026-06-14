@@ -1098,25 +1098,25 @@ def render_login_styles():
             background: var(--background-color);
         }
         .block-container {
-            max-width: 600px;
-            padding-top: 7vh;
+            max-width: 560px;
+            padding-top: 6vh;
         }
         div[data-testid="stForm"] {
             background: var(--secondary-background-color);
             border: 1px solid rgba(148, 163, 184, 0.35);
             border-top: 0;
-            border-radius: 0 0 14px 14px;
-            margin-top: -1rem;
-            padding: 1rem 32px 32px 32px;
-            box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
+            border-radius: 0 0 16px 16px;
+            margin-top: -2.35rem;
+            padding: 1.95rem 36px 34px 36px;
+            box-shadow: 0 16px 34px rgba(15, 23, 42, 0.08);
             color: var(--text-color);
         }
         .login-card-head {
             background: var(--secondary-background-color);
             border: 1px solid rgba(148, 163, 184, 0.35);
             border-bottom: 0;
-            border-radius: 14px 14px 0 0;
-            padding: 32px 32px 0 32px;
+            border-radius: 16px 16px 0 0;
+            padding: 32px 36px 0 36px;
             margin-bottom: 0;
         }
         .login-card-head [data-testid="column"]:last-child {
@@ -1124,19 +1124,31 @@ def render_login_styles():
             justify-content: flex-end;
         }
         .login-card-head [data-testid="stSelectbox"] {
-            max-width: 130px;
+            max-width: 170px;
         }
+        div[data-testid="stFormSubmitButton"],
+        div[data-testid="stFormSubmitButton"] > div,
         div[data-testid="stFormSubmitButton"] button {
             width: 100%;
-            border-radius: 10px;
+        }
+        div[data-testid="stFormSubmitButton"] button {
+            border-radius: 11px;
             background: #18a8e0;
             border-color: #18a8e0;
             color: white;
             font-weight: 700;
-            min-height: 42px;
+            min-height: 44px;
+        }
+        div[data-testid="stFormSubmitButton"] button:hover {
+            background: #1298cf;
+            border-color: #1298cf;
+            color: white;
+        }
+        div[data-testid="stTextInput"] {
+            width: 100%;
         }
         div[data-testid="stTextInput"] input {
-            min-height: 40px;
+            min-height: 42px;
             border-radius: 10px;
             background: var(--background-color);
             color: var(--text-color);
@@ -1158,7 +1170,7 @@ def render_login_styles():
             display: flex;
             align-items: center;
             gap: 12px;
-            margin-bottom: 28px;
+            margin-bottom: 0;
         }
         .login-logo {
             width: 40px;
@@ -1184,14 +1196,25 @@ def render_login_styles():
             font-size: 25px;
             font-weight: 800;
             color: var(--text-color);
-            margin-bottom: 6px;
+            margin-bottom: 4px;
         }
         .login-helper {
-            color: var(--text-color);
-            margin-bottom: 24px;
+            color: rgba(148, 163, 184, 0.95);
+            margin-bottom: 22px;
         }
         div[data-testid="stForm"] > div:first-child {
-            gap: 1rem;
+            gap: 0.95rem;
+        }
+        @media (max-width: 640px) {
+            .block-container {
+                max-width: 94vw;
+                padding-top: 3vh;
+            }
+            .login-card-head,
+            div[data-testid="stForm"] {
+                padding-left: 22px;
+                padding-right: 22px;
+            }
         }
         </style>
         """,
