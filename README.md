@@ -10,6 +10,7 @@ A simple Streamlit + Supabase Postgres system for stationery and cooking gas bus
 - Cooking gas and gas accessory stock
 - Cooking gas and gas accessory sales
 - Staff clock-in and clock-out
+- Credit sales and customer debt tracking
 - Expenses
 - Low stock alerts
 - Sales, profit, purchase, expense and service reports
@@ -62,6 +63,8 @@ Keep this file private because it contains passwords. When deploying, add the sa
 7. Gas staff can use **Gas Inventory/Stock** and **Gas Sales**.
 8. Admins can use the full dashboard, expenses, reports, and export tools to monitor both businesses.
 9. Staff must clock in with their employee code and name before using their allowed work pages.
+10. Use **Credit** as the payment method when a customer buys on debt.
+11. Admins can use **Debtors / Daftari** to view balances and record repayments.
 
 ## Notes
 
@@ -71,3 +74,4 @@ Keep this file private because it contains passwords. When deploying, add the sa
 - Inventory, sales, service sales, and expenses can be edited or deleted for 24 hours after they are added.
 - Gas records follow the same 24-hour edit/delete rule.
 - The shared staff login controls shop access, while clock-in records the individual employee working the shift.
+- Customer debt is tracked through a ledger, so every credit sale and repayment has a paper trail.
